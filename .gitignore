@@ -1,0 +1,7 @@
+# 本地 Git 自动忽略
+*.db-journal
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+*.tmp
