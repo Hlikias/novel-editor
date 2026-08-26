@@ -299,6 +299,29 @@ QPushButton:default:hover {
     background-color: {PRIMARY_HOVER};
 }
 
+/* ================= 消息框（统一样式，无边框） ================= */
+QMessageBox {
+    background-color: {WINDOW};
+    color: {TEXT};
+    border: 1px solid {SEPLINE};
+    border-radius: 12px;
+}
+QMessageBox QLabel {
+    color: {TEXT};
+    background: transparent;
+}
+QMessageBox QLabel#qt_msgbox_label {
+    font-weight: bold;
+    font-size: 14px;
+    color: {ACCENT_TEXT};
+}
+QMessageBox QPushButton {
+    min-width: 72px;
+}
+QMessageBox QDialogButtonBox {
+    padding: 0 10px 8px 10px;
+}
+
 /* ================= 输入控件 ================= */
 QLineEdit, QPlainTextEdit, QTextEdit, QComboBox,
 QSpinBox, QDoubleSpinBox {

@@ -190,19 +190,26 @@ class WindowResizer(QObject):
             QApplication.restoreOverrideCursor()
             self._cursor_set = False
 
+    def _window_valid(self) -> bool:
+        """窗口 C++ 对象是否仍有效（避免 SystemError/递归刷屏）。"""
+        try:
+            import shiboken6
+            return bool(shiboken6.isValid(self.window)) and self.window is not None
+        except Exception:  # noqa: BLE001
+            return False
+
     def eventFilter(self, obj, ev):
-        if not self._alive:
-            return super().eventFilter(obj, ev)
+        if not self._alive or not self._window_valid():
+            return False
         try:
             return self._handle(obj, ev)
-        except RuntimeError:
-            # 窗口已销毁：移除全局过滤器，避免递归报错
-            self._alive = False
+        except Exception:  # noqa: BLE001  （含 SystemError：窗口销毁期访问已删对象）
+            self._alive = False   # 熔断：之后不再处理，避免 Qt 反复刷屏
             try:
                 QApplication.instance().removeEventFilter(self)
             except Exception:  # noqa: BLE001
                 pass
-            return super().eventFilter(obj, ev)
+            return False
 
     def _handle(self, obj, ev):
         if not self.window.isVisible() or self.window.isMaximized():

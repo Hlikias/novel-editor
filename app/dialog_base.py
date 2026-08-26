@@ -119,7 +119,8 @@ class DialogTitleBar(QWidget):
         self.max_btn.setText("❐" if self.dialog.isMaximized() else "□")
 
     def paintEvent(self, event):
-        """只圆上边两角，下边与内容区平齐；渐变配色随主题。"""
+        """只圆上边两角，下边与内容区平齐；渐变配色随主题。
+        四角先用渐变起始色铺满，避免圆角外露出底色/纯白角。"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         start, end = get_dialog_gradient()
@@ -138,6 +139,7 @@ class DialogTitleBar(QWidget):
         path.lineTo(w, h)
         path.lineTo(0.0, h)
         path.closeSubpath()
+        painter.fillRect(self.rect(), QColor(start))   # 四角与渐变顶部同色
         painter.fillPath(path, gradient)
 
     # ---------- 拖拽移动 ----------

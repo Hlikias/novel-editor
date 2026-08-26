@@ -58,6 +58,39 @@ class SettingsDialog(GradientDialog):
 
         self.tabs.addTab(general_tab, "⚙ 通用")
 
+        # ---------- 隐私保护 ----------
+        privacy_tab = QWidget()
+        pv = QVBoxLayout(privacy_tab)
+        privacy = config.get("privacy", {})
+        self.strict_check = QCheckBox("🔒 严格隐私模式（推荐）：小说内容绝不上传网络")
+        self.strict_check.setChecked(bool(privacy.get("strict", True)))
+        pv.addWidget(self.strict_check)
+        strict_hint = QLabel(
+            "开启后：AI 写作功能禁用（会把文本发送到 AI 服务）；\n"
+            "成语/金句/网络用语查询只使用本地词库，不发送任何词条；\n"
+            "语音输入为本地识别（System.Speech），不受影响。"
+        )
+        strict_hint.setObjectName("mutedLabel")
+        strict_hint.setWordWrap(True)
+        pv.addWidget(strict_hint)
+        self.ai_net_check = QCheckBox("允许 AI 网络写作（选中的文本会发送到 AI 服务）")
+        self.ai_net_check.setChecked(bool(privacy.get("ai_enabled", False)))
+        pv.addWidget(self.ai_net_check)
+        self.quote_net_check = QCheckBox("允许查询联网（会发送查询词到搜索/API）")
+        self.quote_net_check.setChecked(bool(privacy.get("network_quotes", False)))
+        pv.addWidget(self.quote_net_check)
+        pv.addStretch(1)
+        self.tabs.addTab(privacy_tab, "🔒 隐私")
+
+        # 严格模式与两项联网开关联动
+        def _sync_privacy(strict: bool):
+            for cb in (self.ai_net_check, self.quote_net_check):
+                if strict:
+                    cb.setChecked(False)
+                cb.setEnabled(not strict)
+        self.strict_check.toggled.connect(_sync_privacy)
+        _sync_privacy(self.strict_check.isChecked())
+
         # ---------- API 设置 ----------
         api_tab = QWidget()
         api_form = QFormLayout(api_tab)
@@ -308,6 +341,12 @@ class SettingsDialog(GradientDialog):
         app["autosave_minutes"] = self.autosave_min_spin.value()
         app["open_recent_on_start"] = self.open_recent_check.isChecked()
         app["recent_limit"] = self.recent_limit_spin.value()
+
+        # 隐私保护
+        privacy = self.config.setdefault("privacy", {})
+        privacy["strict"] = self.strict_check.isChecked()
+        privacy["ai_enabled"] = self.ai_net_check.isChecked()
+        privacy["network_quotes"] = self.quote_net_check.isChecked()
 
         # 自定义快捷键
         new_sc = {}

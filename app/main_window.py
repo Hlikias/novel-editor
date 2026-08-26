@@ -262,6 +262,11 @@ class MainWindow(QMainWindow):
             | QMainWindow.DockOption.AllowTabbedDocks
         )
 
+        # 插件系统：加载用户插件（供菜单与编辑器右键使用）
+        from .plugin_manager import PluginManager
+        self.plugin_manager = PluginManager(self)
+        self.plugin_manager.load_all()
+
         self._build_menus()
         self._build_central()
         # 写作时间统计：打开项目且窗口聚焦时每秒计 1 秒
@@ -462,7 +467,7 @@ class MainWindow(QMainWindow):
         self._add_action(ai_menu, "⚙ AI 设置…", self.show_settings_dialog, None, None)
         self._menus.append(("AI", ai_menu))
 
-        # ---- 帮助 ----
+        # ---- 帮助（含插件管理 action） ----
         help_menu = QMenu(self)
         self._help_menu = help_menu
         theme_menu = help_menu.addMenu("🎨 界面风格")
@@ -473,7 +478,31 @@ class MainWindow(QMainWindow):
         help_menu.addSeparator()
         self._add_action(help_menu, "⌨ 快捷键一览", self.show_shortcuts, None, None)
         self._add_action(help_menu, "关于", self.show_about, None, None)
+        help_menu.addSeparator()
+        self._add_action(help_menu, "🧩 打开插件目录…", self._open_plugin_dir, None, None)
+        self._add_action(help_menu, "🔄 重新加载插件", self._reload_plugins, None, None)
+        # 各插件的工具动作：打开帮助菜单时动态生成
+        help_menu.aboutToShow.connect(self._rebuild_help_plugins)
         self._menus.append(("帮助", help_menu))
+
+    # ---------- 插件 ----------
+    def _rebuild_help_plugins(self):
+        """在帮助菜单里重建插件的工具动作（每次打开菜单时刷新）。"""
+        menu = self._help_menu
+        for act in list(menu.actions()):
+            if getattr(act, "_plugin_item", False):
+                menu.removeAction(act)
+                act.deleteLater()
+        if not self.plugin_manager.plugins:
+            return
+        sep = menu.addSeparator()
+        sep._plugin_item = True
+        for pname, item in self.plugin_manager.tool_actions():
+            act = menu.addAction(f"🧩 {pname}：{item['text']}")
+            act._plugin_item = True
+            cb = item.get("callback")
+            if cb:
+                act.triggered.connect(lambda _=False, f=cb: f(self))
 
     def _add_action(self, menu: QMenu, text: str, slot, shortcut: str | None,
                     style_icon: str | None):
@@ -489,6 +518,18 @@ class MainWindow(QMainWindow):
         if shortcut:
             self._shortcut_actions.setdefault(text, []).append(act)
         return act
+
+    # ---------- 插件 ----------
+    def _open_plugin_dir(self):
+        import subprocess
+        from .plugin_manager import PLUGIN_DIR
+        os.makedirs(PLUGIN_DIR, exist_ok=True)
+        subprocess.Popen(["explorer", PLUGIN_DIR])
+
+    def _reload_plugins(self):
+        self.plugin_manager.load_all()
+        self.log(f"已重新加载 {len(self.plugin_manager.plugins)} 个插件", "ok")
+        self.log("插件功能在帮助菜单与编辑器右键菜单中", "info")
 
     def _build_central(self):
         # 中央区：欢迎页（未开项目） ⇄ 编辑器标签页（已开项目）
@@ -641,6 +682,18 @@ class MainWindow(QMainWindow):
         if self.storage is None:
             return set()
         return {b.line for b in self.storage.list_bookmarks() if b.chapter_id == chapter_id}
+
+    def _rename_editor_bookmark(self, chapter_id: int, line: int, name: str):
+        """编辑器书签栏双击已添加的书签 → 设置书签名字。"""
+        if self.storage is None:
+            return
+        b = next((x for x in self.storage.list_bookmarks()
+                  if x.chapter_id == chapter_id and x.line == line), None)
+        if b is not None:
+            b.note = (name or "").strip() or f"第{line}行"
+            self.storage.update_bookmark(b)
+            self.bookmarks_view.refresh()
+            self.log(f"书签已命名：第 {line} 行 → {b.note}", "ok")
 
     def _sync_editor_bookmarks(self, chapter_id: int):
         editor = self._tab_chapters.get(chapter_id)
@@ -936,21 +989,23 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.preview_dock)
         self.tabifyDockWidget(self.chapter_dock, self.preview_dock)
 
-        # ---- 底部：成语/金句查询（与日志叠） ----
-        self.quote_dock = QDockWidget("🀄 成语 / 金句", self)
-        self.quote_dock.setObjectName("quote_dock")
+        # ---- 右侧：成语/金句/歇后语查询（与 AI/统计/便签叠成标签页） ----
+        self.quote_dock = QDockWidget("🀄 成语 / 金句 / 歇后语", self)
+        # objectName 带 _r 后缀：旧的底部布局记忆不再匹配，默认落在右侧
+        self.quote_dock.setObjectName("quote_dock_r")
         self.quote_view = QuoteDock()
         self.quote_dock.setWidget(self.quote_view)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.quote_dock)
-        self.tabifyDockWidget(self.log_dock, self.quote_dock)
-        self.log_dock.raise_()
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.quote_dock)
+        self.tabifyDockWidget(self.ai_dock, self.quote_dock)
+        self.ai_dock.raise_()
 
         # 启动时应用已保存的简洁模式（所有 dock 与格式栏已就绪）
         if self.config.get("app", {}).get("simple_mode", False):
             self.simple_mode_action.setChecked(True)
 
         # 视图菜单：切换 dock + 专注模式
-        view_menu = QMenu("视图(&V)", self)
+        self.view_menu = QMenu("视图(&V)", self)
+        view_menu = self.view_menu
         view_menu.addAction(self.chapter_dock.toggleViewAction())
         view_menu.addAction(self.outline_dock.toggleViewAction())
         view_menu.addAction(self.overview_dock.toggleViewAction())
@@ -961,6 +1016,15 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.log_dock.toggleViewAction())
         view_menu.addAction(self.quote_dock.toggleViewAction())
         view_menu.addAction(self.search_dock.toggleViewAction())
+        view_menu.addSeparator()
+        view_menu.addAction(
+            "🌐 网络金句 / 成语 / 歇后语查询",
+            lambda: (self.quote_dock.show(), self.quote_dock.raise_()),
+        )
+        view_menu.addAction(
+            "🔍 词库检索…",
+            lambda: self._open_quote_search(),
+        )
         view_menu.addSeparator()
         self.focus_action = QAction("专注模式（隐藏所有面板）", self)
         self.focus_action.setCheckable(True)
@@ -979,6 +1043,11 @@ class MainWindow(QMainWindow):
         self._help_menu.addAction("⏱ 写作时间统计", lambda: self._activate_bottom_tab(self.time_view))
         self._help_menu.addSeparator()
         self._help_menu.addAction(self.outline_dock.toggleViewAction())
+
+    def _open_quote_search(self):
+        from .dialogs.quote_search_dialog import QuoteSearchDialog
+        dlg = QuoteSearchDialog(self)
+        dlg.exec()
 
     def _activate_bottom_tab(self, widget):
         self.log_dock.show()
@@ -1498,9 +1567,12 @@ class MainWindow(QMainWindow):
         editor = EditorWidget(self.config)
         editor.chapter_id = chapter_id
         editor.bookmark_callback = self._toggle_editor_bookmark
+        editor.bookmark_rename_callback = self._rename_editor_bookmark
         editor.ai_action_requested.connect(self._ai_edit_task)
         editor.write_requested.connect(self.show_ai_input_dialog)
+        editor.voice_input_requested.connect(self.show_voice_input_dialog)
         editor.query_requested.connect(self._query_entity)
+        editor.plugin_actions_provider = lambda ed=editor: self.plugin_manager.editor_actions(ed)
         editor.quick_texts_provider = lambda: self.config.get("app", {}).get("quick_texts", [])
         editor.cursorPositionChanged.connect(self._status_timer.start)
         editor.textChanged.connect(self._on_editor_text_changed)
@@ -1670,7 +1742,16 @@ class MainWindow(QMainWindow):
         dlg.activateWindow()
         dlg.find_edit.setFocus()
 
-    # ---------- AI 写作输入 / 设定查询 ----------
+    # ---------- AI 写作输入 / 语音输入 / 设定查询 ----------
+    def show_voice_input_dialog(self):
+        editor = self.current_editor()
+        if editor is None:
+            QMessageBox.information(self, "语音输入", "请先打开一个章节。")
+            return
+        from .voice_input import VoiceInputDialog
+        dlg = VoiceInputDialog(editor, parent=self)
+        dlg.exec()
+
     def show_ai_input_dialog(self):
         if not hasattr(self, "ai_input_dialog") or self.ai_input_dialog is None:
             from .ai_input_dialog import AiInputDialog

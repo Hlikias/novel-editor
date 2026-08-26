@@ -148,7 +148,8 @@ class WorldviewTab(QWidget):
         super().__init__(parent)
         self.storage = storage
         self._current_id = None
-        self._custom_edits: dict[str, QLineEdit] = {}
+        self._field_rows: list[dict] = []
+        self._user_field_names: set = set()   # 用户添加/编辑过的字段名（跨种类保留）
 
         outer = QVBoxLayout(self)
         form = QFormLayout()
@@ -173,13 +174,21 @@ class WorldviewTab(QWidget):
         self.places_edit.setPlaceholderText("主要地点：青云山、魔渊、皇城…（顿号/逗号分隔）")
         form.addRow("主要地点", self.places_edit)
 
-        # 按小说种类动态生成的固定字段（QLineEdit）
+        # 按小说种类/用户自定义的字段（label + 输入框 + x 删除，可增可删可改名）
         self._custom_widget = QWidget()
         self._custom_widget.setStyleSheet("QWidget{background:transparent;}")
         self._custom_layout = QVBoxLayout(self._custom_widget)
         self._custom_layout.setContentsMargins(0, 0, 0, 0)
         self._custom_layout.setSpacing(4)
         form.addRow("", self._custom_widget)
+        add_field_box = QHBoxLayout()
+        add_field_btn = QPushButton("➕ 添加字段")
+        add_field_btn.setFixedSize(132, 30)
+        add_field_btn.setToolTip("添加一个自定义字段（标签可改），如：宗门体系 / 魔法体系 / 社会结构…")
+        add_field_btn.clicked.connect(lambda: self._add_field_row("", ""))
+        add_field_box.addWidget(add_field_btn)
+        add_field_box.addStretch(1)
+        form.addRow("", add_field_box)
 
         self.desc_edit = QPlainTextEdit()
         self.desc_edit.setPlaceholderText(
@@ -188,16 +197,9 @@ class WorldviewTab(QWidget):
         self.desc_edit.setMaximumHeight(70)
         form.addRow("世界描述", self.desc_edit)
 
-        self.attrs_edit = QPlainTextEdit()
-        self.attrs_edit.setPlaceholderText(
-            "自定义属性体系（每行一个属性名，角色页将据此绑定）：\n功法\n法宝\n妖兽种族"
-        )
-        self.attrs_edit.setMaximumHeight(80)
-        form.addRow("自定义属性", self.attrs_edit)
-
         outer.addLayout(form)
 
-        hint = QLabel("💡 一本小说只有一个世界观：切换小说种类会自动增减上方字段，保存即覆盖。")
+        hint = QLabel("💡 一本小说只有一个世界观：字段可自由增删改名（标签+内容），保存即覆盖。")
         hint.setObjectName("mutedLabel")
         hint.setWordWrap(True)
         outer.addWidget(hint)
@@ -217,35 +219,63 @@ class WorldviewTab(QWidget):
 
         self.reload()
 
-    # ---------- 种类字段 ----------
+    # ---------- 动态字段（可增删改） ----------
+    def _add_field_row(self, label: str = "", value: str = "", user: bool = False):
+        """添加一行字段：标签(可编辑) + 内容 + x 删除。user=True 表示用户添加/编辑过。"""
+        label_edit = QLineEdit(label)
+        label_edit.setPlaceholderText("字段名，如：修真境界 / 魔法体系…")
+        label_edit.setFixedWidth(130)
+        value_edit = QLineEdit(value)
+        value_edit.setPlaceholderText("内容")
+        del_btn = QToolButton()
+        del_btn.setText("✕")
+        del_btn.setAutoRaise(True)
+        del_btn.setToolTip("删除该字段")
+        row_w = QWidget()
+        hl = QHBoxLayout(row_w)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.addWidget(label_edit)
+        hl.addWidget(value_edit, 1)
+        hl.addWidget(del_btn)
+        rec = {"label": label_edit, "value": value_edit, "widget": row_w}
+        del_btn.clicked.connect(lambda: self._remove_field_row(rec))
+        # 用户编辑标签 → 标记为用户字段（切换种类时保留）
+        label_edit.textEdited.connect(lambda _t, r=rec: self._mark_user_field(r))
+        self._field_rows.append(rec)
+        self._custom_layout.addWidget(row_w)
+        if user:
+            self._mark_user_field(rec)
+
+    def _mark_user_field(self, rec: dict):
+        name = rec["label"].text().strip()
+        if name:
+            self._user_field_names.add(name)
+
+    def _remove_field_row(self, rec: dict):
+        if rec in self._field_rows:
+            self._field_rows.remove(rec)
+        w = rec.get("widget")
+        if w is not None:
+            self._custom_layout.removeWidget(w)
+            w.setParent(None)
+            w.deleteLater()
+
     def _rebuild_custom_fields(self):
-        """按当前小说种类重建固定字段（切换时保留旧字段已填内容）。"""
-        old = {name: ed.text() for name, ed in self._custom_edits.items()}
-        while self._custom_layout.count():
-            it = self._custom_layout.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                w.deleteLater()
-        self._custom_edits = {}
+        """按当前小说种类重建字段：默认字段 + 用户自定义字段（跨种类保留）。"""
+        old = {r["label"].text().strip() or "?": r["value"].text() for r in self._field_rows}
+        for rec in list(self._field_rows):
+            self._remove_field_row(rec)
         genre = self.genre_combo.currentText()
-        for fname in WORLDVIEW_FIELDS.get(genre, []):
-            row = QWidget()
-            hl = QHBoxLayout(row)
-            hl.setContentsMargins(0, 0, 0, 0)
-            lbl = QLabel(fname)
-            lbl.setFixedWidth(90)
-            edit = QLineEdit(old.get(fname, ""))
-            edit.setPlaceholderText(f"填写{fname}…")
-            hl.addWidget(lbl)
-            hl.addWidget(edit)
-            self._custom_layout.addWidget(row)
-            self._custom_edits[fname] = edit
+        defaults = WORLDVIEW_FIELDS.get(genre, [])
+        user_names = [n for n in self._user_field_names if n in old]
+        names = list(dict.fromkeys([*defaults, *user_names]))
+        for name in names:
+            self._add_field_row(name, old.get(name, ""))
+        if not names:
+            self._add_field_row("", "")
 
     def _on_genre_changed(self):
         self._rebuild_custom_fields()
-        # 新建/属性为空时，按题材自动填入自定义属性模板
-        if self._current_id is None or not self.attrs_edit.toPlainText().strip():
-            self.attrs_edit.setPlainText(GENRE_TEMPLATES.get(self.genre_combo.currentText(), ""))
 
     # ---------- 加载 / 保存（唯一世界观） ----------
     def reload(self):
@@ -261,10 +291,18 @@ class WorldviewTab(QWidget):
         self.desc_edit.setPlainText(wv.description)
         self.era_edit.setText(wv.era)
         self.places_edit.setText(wv.places)
-        self.attrs_edit.setPlainText(wv.attributes)
         self._rebuild_custom_fields()
-        for name, edit in self._custom_edits.items():
-            edit.setText(str((wv.custom_fields or {}).get(name, "")))
+        # 用已保存字段值填充（含用户自定义的标签）
+        saved = wv.custom_fields or {}
+        for rec in self._field_rows:
+            key = rec["label"].text().strip()
+            if key and key in saved:
+                rec["value"].setText(str(saved[key]))
+        # 兼容旧数据：attributes 里的属性名并入字段
+        for line in (wv.attributes or "").splitlines():
+            name = line.strip()
+            if name and name not in [r["label"].text().strip() for r in self._field_rows]:
+                self._add_field_row(name, "")
 
     def _clear_form(self):
         self._current_id = None
@@ -273,8 +311,8 @@ class WorldviewTab(QWidget):
         self.era_edit.clear()
         self.places_edit.clear()
         self.desc_edit.clear()
+        self._user_field_names = set()
         self._rebuild_custom_fields()
-        self.attrs_edit.setPlainText(GENRE_TEMPLATES.get(self.genre_combo.currentText(), ""))
 
     def _save(self):
         wv = self.storage.get_single_worldview()
@@ -285,8 +323,11 @@ class WorldviewTab(QWidget):
         wv.era = self.era_edit.text().strip()
         wv.places = self.places_edit.text().strip()
         wv.description = self.desc_edit.toPlainText().strip()
-        wv.attributes = self.attrs_edit.toPlainText().strip()
-        wv.custom_fields = {n: e.text().strip() for n, e in self._custom_edits.items()}
+        rows = [(r["label"].text().strip(), r["value"].text().strip()) for r in self._field_rows]
+        rows = [(n, v) for n, v in rows if n]
+        wv.custom_fields = {n: v for n, v in rows}
+        # 字段名同步到 attributes（角色页绑定沿用）
+        wv.attributes = "\n".join(n for n, _ in rows)
         if wv.id:
             self.storage.update_worldview(wv)
         else:
@@ -518,23 +559,36 @@ class CharacterTab(QWidget):
         grid.addLayout(rel_row, row + 1, 1, 1, 3)
         row += 2
 
-        # 按钮行
+        # 按钮行：功能按钮
         save_row = QHBoxLayout()
         add_btn = QPushButton("➕ 新增")
         del_btn = QPushButton("🗑 删除")
         template_btn = QPushButton("📋 复制为新角色（模板）")
-        save_btn = QPushButton("💾 保存")
         import_btn = QPushButton("📥 导入 JSON")
         export_btn = QPushButton("📤 导出 JSON")
         add_btn.clicked.connect(self._add)
         del_btn.clicked.connect(self._delete)
         template_btn.clicked.connect(self._use_as_template)
-        save_btn.clicked.connect(self._save)
         import_btn.clicked.connect(self._import_json)
         export_btn.clicked.connect(self._export_json)
-        for b in (add_btn, del_btn, template_btn, save_btn, import_btn, export_btn):
+        for b in (add_btn, del_btn, template_btn, import_btn, export_btn):
             save_row.addWidget(b)
+        save_row.addStretch(1)
         grid.addLayout(save_row, row, 0, 1, 4)
+        row += 1
+
+        # 保存按钮：单独一行、加大加粗，突出显示
+        big_save_row = QHBoxLayout()
+        big_save_btn = QPushButton("💾 保存角色")
+        big_save_btn.setFixedHeight(40)
+        big_save_btn.setStyleSheet(
+            "QPushButton{background:#2FA573;color:#fff;font-size:15px;font-weight:bold;"
+            "border:none;border-radius:10px;}"
+            "QPushButton:hover{background:#279262;}"
+        )
+        big_save_btn.clicked.connect(self._save)
+        big_save_row.addWidget(big_save_btn, 1)
+        grid.addLayout(big_save_row, row, 0, 1, 4)
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 1)
@@ -711,12 +765,17 @@ class CharacterTab(QWidget):
 
     def _open_growth_flow(self):
         if self._current_id is None:
+            QMessageBox.information(self, "成长流程图", "请先在左侧选中一个角色。")
             return
         ch = self.storage.get_character(self._current_id)
         if ch is None:
             return
-        dlg = GrowthFlowDialog(self.storage, ch, self)
-        dlg.exec()
+        try:
+            dlg = GrowthFlowDialog(self.storage, ch, self)
+            dlg.exec()
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "成长流程图", f"打开失败：{e}")
+            return
         # 重载最新流程图（growth 可能也在对话框内更新）
         fresh = self.storage.get_character(ch.id)
         self.growth_edit.setPlainText(fresh.growth if fresh else ch.growth)
@@ -1918,6 +1977,10 @@ class PlotOutlineTab(QWidget):
         self.stage_tree = QTreeWidget()
         self.stage_tree.setHeaderLabels(["章节", "阶段"])
         self.stage_tree.setColumnWidth(0, 200)
+        # 行高足够，避免下拉框/字体被截断
+        self.stage_tree.setStyleSheet(
+            "QTreeWidget::item { height: 30px; }"
+        )
         outer.addWidget(self.stage_tree, 1)
 
         self.reload()
@@ -2313,21 +2376,34 @@ class _GraphNode(QGraphicsEllipseItem):
 
 
 class _GraphEdge(QGraphicsLineItem):
-    """关系连线：从两个节点圆的边缘连线（不穿过圆），关系文字画在线段中点，带箭头指向 from→to。"""
+    """关系连线：从两个节点圆的边缘连线（不穿过圆），关系文字画在线段中点，带箭头指向 from→to。
+    拖动节点时动态跟随（端点实时取节点中心）。"""
 
-    def __init__(self, x1, y1, x2, y2, rel_id, relation="", r1=0.0, r2=0.0):
+    def __init__(self, x1, y1, x2, y2, rel_id, relation="", r1=0.0, r2=0.0,
+                 node_from=None, node_to=None, off=(0.0, 0.0)):
         super().__init__(x1, y1, x2, y2)
         self.rel_id = rel_id
         self.relation = relation
         self.r1 = r1
         self.r2 = r2
+        self.node_from = node_from
+        self.node_to = node_to
+        self.off = off          # 多关系错开的偏移（移动节点后保持错开）
         self.setPen(QPen(QColor("#C9A227"), 1.6))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def _centers(self):
+        """取两端节点当前中心（节点被拖动后实时跟随，叠加错开偏移）。"""
+        if self.node_from is not None and self.node_from.scene() is not None:
+            c1 = self.node_from.sceneBoundingRect().center() + QPointF(*self.off)
+            c2 = self.node_to.sceneBoundingRect().center() + QPointF(*self.off)
+            return c1, c2
+        return self.line().p1(), self.line().p2()
 
     def _endpoints(self):
         """返回截断到两圆边缘后的线段端点。"""
         import math
-        p1, p2 = self.line().p1(), self.line().p2()
+        p1, p2 = self._centers()
         dx, dy = p2.x() - p1.x(), p2.y() - p1.y()
         dist = math.hypot(dx, dy)
         if dist < 1:
@@ -2352,13 +2428,10 @@ class _GraphEdge(QGraphicsLineItem):
         painter.setBrush(QColor("#C9A227"))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawPolygon([end.toPoint(), head1.toPoint(), head2.toPoint()])
-        # 关系文字画在线段中点（白底浅衬，确保可读）
+        # 关系文字画在线段中点的上方（纯文字，无背景衬底）
         if self.relation:
             mid = (start + end) / 2
-            rect = QRectF(mid.x() - 80, mid.y() - 15, 160, 30)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(255, 255, 255, 200))
-            painter.drawRoundedRect(rect, 6, 6)
+            rect = QRectF(mid.x() - 80, mid.y() - 22, 160, 20)
             painter.setPen(QColor("#8A6D1A"))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.relation)
 
@@ -2483,6 +2556,16 @@ class RelationGraphWidget(QWidget):
         n = len(chars)
         cx, cy = 360.0, 260.0
         center_mode = self._center_id != 0
+        if center_mode:
+            # 中心模式：只显示中心角色 + 与它建立过关系的人物（含双向）
+            all_rels = self.storage.list_relations(self.chapter_id)
+            related = {self._center_id}
+            for r in all_rels:
+                if r.char_from_id == self._center_id:
+                    related.add(r.char_to_id)
+                if r.char_to_id == self._center_id:
+                    related.add(r.char_from_id)
+            chars = [c for c in chars if c.id in related]
         positions = {}
         if center_mode:
             # 中心角色居中，其他角色环绕
@@ -2503,6 +2586,7 @@ class RelationGraphWidget(QWidget):
                 else:
                     positions[c.id] = (cx, cy)
         node_size = 100.0
+        nodes_by_id: dict[int, _GraphNode] = {}
         for c in chars:
             if c.id not in positions:
                 continue
@@ -2515,17 +2599,38 @@ class RelationGraphWidget(QWidget):
                 node.setBrush(QBrush(QColor("#FDE9B8")))
                 node.setPen(QPen(QColor("#E8A23D"), 3))
             scene.addItem(node)
+            nodes_by_id[c.id] = node
         # 关系：中心模式只画涉及中心角色的连线（从圆边缘连线、箭头指向、文字在线中）
         rels = self.storage.list_relations(self.chapter_id)
         if center_mode:
             rels = [r for r in rels
                     if r.char_from_id == self._center_id or r.char_to_id == self._center_id]
+        # 同两人多条关系：A→B 与 B→A 合并为一组，线沿垂直方向错开，避免重叠
+        from collections import defaultdict
+        groups: dict = defaultdict(list)
         for r in rels:
             if r.char_from_id in positions and r.char_to_id in positions:
-                x1, y1 = positions[r.char_from_id]
-                x2, y2 = positions[r.char_to_id]
-                edge = _GraphEdge(x1, y1, x2, y2, r.id, relation=r.relation,
-                                  r1=node_size / 2, r2=node_size / 2)
+                key = tuple(sorted((r.char_from_id, r.char_to_id)))
+                groups[key].append(r)
+        import math as _math
+        for (_k1, _k2), rlist in groups.items():
+            r0 = rlist[0]
+            x1, y1 = positions[r0.char_from_id]
+            x2, y2 = positions[r0.char_to_id]
+            dx, dy = x2 - x1, y2 - y1
+            ln = _math.hypot(dx, dy) or 1.0
+            nx, ny = -dy / ln, dx / ln          # 垂直方向单位向量
+            n = len(rlist)
+            for k, r in enumerate(rlist):
+                off = (k - (n - 1) / 2) * 18    # 多条线等距错开
+                offx, offy = nx * off, ny * off
+                ex1, ey1 = x1 + offx, y1 + offy
+                ex2, ey2 = x2 + offx, y2 + offy
+                edge = _GraphEdge(ex1, ey1, ex2, ey2, r.id, relation=r.relation,
+                                  r1=node_size / 2, r2=node_size / 2,
+                                  node_from=nodes_by_id.get(r.char_from_id),
+                                  node_to=nodes_by_id.get(r.char_to_id),
+                                  off=(offx, offy))
                 scene.addItem(edge)
         self._scene = scene
         self._positions = positions
@@ -2960,10 +3065,17 @@ class MapTab(QWidget):
         self._draw()
 
     # ---------- 绘制 ----------
+    def _map_bg_color(self, map_id: int):
+        """不同地图不同背景色（按地图 id 稳定取色）。"""
+        hues = [150, 210, 30, 280, 90, 330, 200, 45, 260, 10]
+        h = hues[map_id % len(hues)] if map_id else 150
+        return QColor.fromHsv(h, 42, 246)
+
     def _draw(self):
         from PySide6.QtGui import QPixmap
         from PySide6.QtWidgets import QGraphicsScene
         scene = QGraphicsScene()
+        bg_color = self._map_bg_color(self._current_map_id)
         img_path = self._current_map_image()
         if img_path and os.path.exists(img_path):
             pix = QPixmap(img_path)
@@ -2971,10 +3083,10 @@ class MapTab(QWidget):
                 bg = scene.addPixmap(pix.scaled(1200, 800, Qt.AspectRatioMode.KeepAspectRatio,
                                                 Qt.TransformationMode.SmoothTransformation))
             else:
-                bg = scene.addRect(0, 0, 1200, 800, QPen(QColor("#D8E9E1")), QBrush(QColor("#F7FBF9")))
+                bg = scene.addRect(0, 0, 1200, 800, QPen(QColor("#D8E9E1")), QBrush(bg_color))
         else:
-            bg = scene.addRect(0, 0, 1200, 800, QPen(QColor("#D8E9E1")), QBrush(QColor("#F7FBF9")))
-            grid_pen = QPen(QColor("#E7F0EA"))
+            bg = scene.addRect(0, 0, 1200, 800, QPen(QColor("#D8E9E1")), QBrush(bg_color))
+            grid_pen = QPen(bg_color.darker(108))
             grid_pen.setWidth(1)
             for x in range(0, 1201, 100):
                 scene.addLine(x, 0, x, 800, grid_pen)
@@ -3147,57 +3259,74 @@ class MapTab(QWidget):
 # 动态「标签:值」行（一排两个，标签可自由修改）
 # ======================================================================
 class DynamicFieldGrid(QWidget):
-    def __init__(self, parent=None, add_text="➕ 添加字段", label_w=120):
+    """动态字段：每行 = 标签 + 值 + ✕ 删除，可增可删。
+    单列稳定布局（不随窗口尺寸错位），标签可改，值与保存一一对应。"""
+
+    def __init__(self, parent=None, add_text="➕ 添加字段", label_w=130):
         super().__init__(parent)
         self.setStyleSheet("QWidget{background:transparent;}")   # 避免白色块
-        self._items: list = []   # [(label, value)]
-        self._edits: list = []
+        self._items: list = []      # [(label, value)]（兼容旧接口）
+        self._edits: list = []      # [(label_edit, value_edit)]（兼容旧接口）
+        self._rows: list[dict] = []  # {"label","value","widget"}
         self._label_w = label_w
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(2)
-        self._grid = QGridLayout()
-        self._grid.setContentsMargins(0, 0, 0, 0)
-        self._layout.addLayout(self._grid)
-        add_btn = QPushButton(add_text)
-        add_btn.clicked.connect(lambda: self.add_row())
-        self._layout.addWidget(add_btn)
+
+        # 添加按钮：固定尺寸固定位置，不随窗口尺寸漂移
+        add_box = QHBoxLayout()
+        add_box.setContentsMargins(0, 0, 0, 0)
+        self._add_btn = QPushButton(add_text)
+        self._add_btn.setFixedSize(132, 30)
+        self._add_btn.clicked.connect(lambda: self.add_row())
+        add_box.addWidget(self._add_btn)
+        add_box.addStretch(1)
+        self._layout.addLayout(add_box)
 
     def add_row(self, label: str = "", value: str = ""):
+        """新增一行（插入到添加按钮之前）。"""
         self._items.append((label, value))
-        self._relayout()
+        self._append_row_widget(label, value)
 
-    def _relayout(self):
-        while self._grid.count():
-            it = self._grid.takeAt(0)
-            if it.widget() is not None:
-                it.widget().deleteLater()
-        self._edits = []
-        for i, (label, value) in enumerate(self._items):
-            le = QLineEdit(label)
-            le.setPlaceholderText("标签")
-            le.setMinimumWidth(self._label_w)
-            ve = QLineEdit(value)
-            ve.setPlaceholderText("值")
-            del_btn = QPushButton("✕")
-            del_btn.setFixedSize(24, 24)
-            del_btn.setToolTip("删除该字段")
-            del_btn.clicked.connect(lambda _=False, idx=i: self._remove_row(idx))
-            self._edits.append((le, ve))
-            r, c = divmod(i, 2)
-            self._grid.addWidget(le, r, c * 3)
-            self._grid.addWidget(ve, r, c * 3 + 1)
-            self._grid.addWidget(del_btn, r, c * 3 + 2)
-        # 值列与删除按钮列拉伸/对齐
-        for col in (1, 4):
-            self._grid.setColumnStretch(col, 1)
-        for col in (0, 3):
-            self._grid.setColumnStretch(col, 0)
+    def _append_row_widget(self, label: str = "", value: str = ""):
+        label_edit = QLineEdit(label)
+        label_edit.setPlaceholderText("标签（可改）")
+        label_edit.setFixedWidth(self._label_w)
+        value_edit = QLineEdit(value)
+        value_edit.setPlaceholderText("值")
+        del_btn = QPushButton("✕")
+        del_btn.setFixedSize(26, 26)
+        del_btn.setToolTip("删除该字段")
+        del_btn.setStyleSheet(
+            "QPushButton{border:none;border-radius:6px;background:#F3D5D5;color:#B84A4A;}"
+            "QPushButton:hover{background:#E8A0A0;color:#fff;}"
+        )
+        row_w = QWidget()
+        hl = QHBoxLayout(row_w)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(4)
+        hl.addWidget(label_edit)
+        hl.addWidget(value_edit, 1)
+        hl.addWidget(del_btn)
+        rec = {"label": label_edit, "value": value_edit, "widget": row_w}
+        del_btn.clicked.connect(lambda: self.remove_row(rec))
+        self._rows.append(rec)
+        self._edits.append((label_edit, value_edit))
+        # 插到添加按钮之前（始终在按钮上方）
+        self._layout.insertWidget(self._layout.count() - 1, row_w)
 
-    def _remove_row(self, idx: int):
-        if 0 <= idx < len(self._items):
+    def remove_row(self, rec: dict):
+        """删除某一行（按引用匹配，不依赖索引，删除稳定）。"""
+        if rec in self._rows:
+            idx = self._rows.index(rec)
+            self._rows.pop(idx)
             self._items.pop(idx)
-            self._relayout()
+            self._edits.pop(idx)
+        w = rec.get("widget")
+        if w is not None:
+            self._layout.removeWidget(w)
+            w.setParent(None)
+            w.deleteLater()
 
     def values(self) -> dict:
         out = {}
@@ -3208,14 +3337,17 @@ class DynamicFieldGrid(QWidget):
         return out
 
     def load(self, data: dict | None):
-        self._items = [(str(k), str(v)) for k, v in (data or {}).items()]
-        self._relayout()
-        if not self._items:
-            self.add_row()
+        self.clear()
+        for k, v in (data or {}).items():
+            self.add_row(str(k), str(v))
+        if not self._rows:
+            self.add_row("", "")   # 空时给一行方便填写
 
     def clear(self):
-        self._items = []
-        self._relayout()
+        for rec in list(self._rows):
+            self.remove_row(rec)
+        self._items.clear()
+        self._edits.clear()
 
 
 # ======================================================================
@@ -3247,31 +3379,63 @@ class _FlowNode(QGraphicsRectItem):
 
 
 class _FlowEdge(QGraphicsLineItem):
-    """带箭头的连线（Visio 式连接线）。"""
+    """带箭头的连线（Visio 式连接线，从矩形边缘出发，不穿过节点）。"""
 
-    def __init__(self, x1, y1, x2, y2, f, t):
+    def __init__(self, x1, y1, x2, y2, f, t, node_f=None, node_t=None):
         super().__init__(x1, y1, x2, y2)
         self.f = f
         self.t = t
+        self.node_f = node_f
+        self.node_t = node_t
         self.setPen(QPen(QColor("#C9A227"), 1.6))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
+    def _centers(self):
+        """取两端节点当前中心（节点被拖动后实时跟随）。"""
+        if self.node_f is not None and self.node_f.scene() is not None:
+            c1 = self.node_f.sceneBoundingRect().center()
+            c2 = self.node_t.sceneBoundingRect().center()
+            return c1, c2
+        return self.line().p1(), self.line().p2()
+
+    def _edge_point(self, node, center, out_dir):
+        """从节点中心沿 out_dir 方向到矩形边缘的交点。"""
+        import math
+        if node is None:
+            return center
+        r = node.sceneBoundingRect()
+        dx, dy = out_dir
+        tx = (r.width() / 2) / abs(dx) if abs(dx) > 1e-9 else float("inf")
+        ty = (r.height() / 2) / abs(dy) if abs(dy) > 1e-9 else float("inf")
+        t = min(tx, ty)
+        return QPointF(center.x() + dx * t, center.y() + dy * t)
+
+    def _endpoints(self):
+        import math
+        p1, p2 = self._centers()
+        dx, dy = p2.x() - p1.x(), p2.y() - p1.y()
+        dist = math.hypot(dx, dy) or 1.0
+        ux, uy = dx / dist, dy / dist
+        start = self._edge_point(self.node_f, p1, (ux, uy))
+        end = self._edge_point(self.node_t, p2, (-ux, -uy))
+        return start, end
+
     def paint(self, painter, option, widget=None):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        start, end = self._endpoints()
         painter.setPen(self.pen())
-        painter.drawLine(self.line())
+        painter.drawLine(start, end)
         # 箭头
         import math
-        p1, p2 = self.line().p1(), self.line().p2()
-        ang = math.atan2(p2.y() - p1.y(), p2.x() - p1.x())
+        ang = math.atan2(end.y() - start.y(), end.x() - start.x())
         size = 10
-        head1 = p2 - QPointF(math.cos(ang - math.pi / 6) * size,
-                             math.sin(ang - math.pi / 6) * size)
-        head2 = p2 - QPointF(math.cos(ang + math.pi / 6) * size,
-                             math.sin(ang + math.pi / 6) * size)
+        head1 = end - QPointF(math.cos(ang - math.pi / 6) * size,
+                              math.sin(ang - math.pi / 6) * size)
+        head2 = end - QPointF(math.cos(ang + math.pi / 6) * size,
+                              math.sin(ang + math.pi / 6) * size)
         painter.setBrush(QColor("#C9A227"))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawPolygon([p2.toPoint(), head1.toPoint(), head2.toPoint()])
+        painter.drawPolygon([end.toPoint(), head1.toPoint(), head2.toPoint()])
 
 
 class GrowthFlowDialog(GradientDialog):
@@ -3306,15 +3470,43 @@ class GrowthFlowDialog(GradientDialog):
         save_btn.clicked.connect(self._save)
         for b in (add_btn, link_btn, del_btn, save_btn):
             toolbar.addWidget(b)
+        fit_btn = QPushButton("⛶ 适应窗口")
+        fit_btn.setToolTip("恢复默认缩放并自适应窗口（滚轮可缩放）")
+        fit_btn.clicked.connect(self._fit_view)
+        toolbar.addWidget(fit_btn)
         toolbar.addWidget(self.mode_label)
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
 
         self.view = QGraphicsView()
         self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.view.wheelEvent = self._view_wheel
         self.view.mousePressEvent = self._view_press
         layout.addWidget(self.view, 1)
+        self._zoom = 1.0
         self._load()
+
+    # ---------- 视图缩放 ----------
+    def _view_wheel(self, event):
+        from PySide6.QtWidgets import QGraphicsView
+        delta = event.angleDelta().y()
+        if delta == 0:
+            return QGraphicsView.wheelEvent(self.view, event)
+        factor = 1.2 if delta > 0 else 1 / 1.2
+        new_zoom = max(0.2, min(8.0, self._zoom * factor))
+        if abs(new_zoom - self._zoom) < 1e-9:
+            return
+        self._zoom = new_zoom
+        self.view.scale(factor, factor)
+        event.accept()
+
+    def _fit_view(self):
+        self._zoom = 1.0
+        self.view.resetTransform()
+        if self.view.scene() is not None:
+            self.view.fitInView(self.view.scene().itemsBoundingRect(),
+                                Qt.AspectRatioMode.KeepAspectRatio)
 
     def _load(self):
         from PySide6.QtWidgets import QGraphicsScene
@@ -3338,8 +3530,10 @@ class GrowthFlowDialog(GradientDialog):
     def _make_edge(self, f, t):
         if f not in self._nodes or t not in self._nodes:
             return
-        a, b = self._nodes[f].sceneBoundingRect().center(), self._nodes[t].sceneBoundingRect().center()
-        edge = _FlowEdge(a.x(), a.y(), b.x(), b.y(), f, t)
+        nf, nt = self._nodes[f], self._nodes[t]
+        a = nf.sceneBoundingRect().center()
+        b = nt.sceneBoundingRect().center()
+        edge = _FlowEdge(a.x(), a.y(), b.x(), b.y(), f, t, node_f=nf, node_t=nt)
         self.view.scene().addItem(edge)
         self._edges.append((edge, f, t))
 
@@ -3452,13 +3646,6 @@ class CharacterDialog(GradientDialog):
         plus_btn.setToolTip("添加自定义模块 / 恢复隐藏标签")
         plus_btn.clicked.connect(self._plus_menu)
         self.tabs.setCornerWidget(plus_btn, Qt.Corner.TopRightCorner)
-
-        # 标签栏左侧 ＋ 按钮：一键新建空白自定义模块页
-        plus2_btn = QPushButton("＋")
-        plus2_btn.setFixedSize(28, 24)
-        plus2_btn.setToolTip("新建空白自定义模块页")
-        plus2_btn.clicked.connect(self._quick_add_module)
-        self.tabs.setCornerWidget(plus2_btn, Qt.Corner.TopLeftCorner)
 
         # 各标签页组件
         self.outline_tab = PlotOutlineTab(storage)
@@ -3644,26 +3831,6 @@ class CharacterDialog(GradientDialog):
                 if self.tabs.tabText(i).endswith(md.name) or f"📦 {md.name}" == self.tabs.tabText(i):
                     self.tabs.setCurrentIndex(i)
                     break
-
-    def _quick_add_module(self):
-        """左上角 ＋：快速新建空白自定义模块页（名称 + 空属性）。"""
-        from PySide6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "新建空白模块", "模块名称：", text="新模块")
-        if not ok or not name.strip():
-            return
-        md = ModuleDef(
-            book_id=self.storage.get_book().id,
-            name=name.strip(),
-            attributes="",
-            enabled=1,
-            on_map=0,
-        )
-        md.id = self.storage.add_module_def(md)
-        self._rebuild_tabs()
-        for i in range(self.tabs.count()):
-            if self.tabs.tabText(i).endswith(md.name):
-                self.tabs.setCurrentIndex(i)
-                break
 
 
 class _AddModuleDialog(GradientDialog):

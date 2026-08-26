@@ -152,6 +152,17 @@ class AIPanel(QWidget):
         layout.addWidget(self.status_label)
 
     # ---------- 行为 ----------
+    def _privacy_blocked(self) -> str:
+        """隐私保护：严格模式/未开启 AI 联网时返回提示，否则返回空串。"""
+        p = self.config.get("privacy", {})
+        if p.get("strict", True):
+            return ("🔒 严格隐私模式已开启：AI 会把文本发送到网络，已禁用。\n"
+                    "如需使用，请在「设置 → 隐私」中关闭严格模式并勾选「允许 AI 网络写作」。")
+        if not p.get("ai_enabled", False):
+            return ("🔒 隐私保护：AI 网络写作未开启（文本不会上传）。\n"
+                    "如需使用，请在「设置 → 隐私」中勾选「允许 AI 网络写作」。")
+        return ""
+
     def _can_start(self) -> bool:
         """并发防护：上一条请求未完成时拒绝新任务，避免销毁运行中的 QThread。"""
         if self._worker is not None and self._worker.isRunning():
@@ -168,6 +179,10 @@ class AIPanel(QWidget):
         api_key = api_cfg.get("api_key", "").strip()
         model = api_cfg.get("model", "").strip()
         prompt = self.prompt_edit.toPlainText().strip()
+        blocked = self._privacy_blocked()
+        if blocked:
+            self.status_label.setText(blocked)
+            return
         if not base_url or not api_key:
             self.status_label.setText("⚠ 请先在「设置」中填写 API 地址和密钥")
             return
@@ -197,6 +212,11 @@ class AIPanel(QWidget):
         base_url = api_cfg.get("base_url", "").strip()
         api_key = api_cfg.get("api_key", "").strip()
         model = api_cfg.get("model", "").strip()
+        blocked = self._privacy_blocked()
+        if blocked:
+            if on_done:
+                on_done(None, blocked)
+            return
         if not base_url or not api_key or not model:
             if on_done:
                 on_done(None, "未配置 API，请先在「设置 → API 设置」中填写")

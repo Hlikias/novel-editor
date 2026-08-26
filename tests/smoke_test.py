@@ -73,7 +73,7 @@ print("角色项:", cdlg.char_tab.list_widget.count(),
 from PySide6.QtCore import Qt
 tab_texts = [cdlg.tabs.tabText(i) for i in range(cdlg.tabs.count())]
 assert not any("关系设置" in t for t in tab_texts), "不应再有关系设置 tab"
-assert cdlg.tabs.cornerWidget(Qt.Corner.TopLeftCorner) is not None, "左上角应有 ＋ 按钮"
+assert cdlg.tabs.cornerWidget(Qt.Corner.TopLeftCorner) is None, "左上角 ＋ 按钮已移除"
 assert cdlg.tabs.cornerWidget(Qt.Corner.TopRightCorner) is not None, "右上角应有 ＋ 按钮"
 cc2 = Character(book_id=book.id, name="李四", role="配角")
 cc2.id = st.add_character(cc2)
@@ -97,7 +97,7 @@ rd2 = _RelationDialog(cdlg, st, r.char_from_id, r.chapter_id, relation=r)
 assert rd2.relation_edit.text() == "好友"
 # 右键菜单方法存在（不弹模态）
 assert hasattr(cdlg.graph_tab, "_node_context_menu"), "关系图节点应有右键菜单方法"
-print("角色页关系区 / 左上角＋ / 建立关系弹窗 OK")
+print("角色页关系区 / 右上角＋ / 建立关系弹窗 OK")
 cdlg.close()
 
 # 自定义模块页：动态增删属性
@@ -150,8 +150,9 @@ from app.dialogs.character_dialog import WorldviewTab
 wvt = WorldviewTab(st)
 wvt.name_edit.setText("九州修真界")
 wvt.genre_combo.setCurrentText("修真")
-assert "核心法则" in wvt._custom_edits and "修真境界" in wvt._custom_edits
-wvt._custom_edits["修真境界"].setText("炼气→筑基")
+wvt_rows = lambda: {r["label"].text(): r for r in wvt._field_rows}
+assert "核心法则" in wvt_rows() and "修真境界" in wvt_rows()
+wvt_rows()["修真境界"]["value"].setText("炼气→筑基")
 wvt._save()
 assert len(st.list_worldviews()) == 1, "世界观应唯一"
 assert st.get_single_worldview().custom_fields.get("修真境界") == "炼气→筑基"
@@ -159,7 +160,7 @@ wvt.name_edit.setText("九州修真界·改")
 wvt._save()
 assert len(st.list_worldviews()) == 1, "再次保存应更新而非新增"
 wvt.genre_combo.setCurrentText("都市")
-assert wvt._custom_edits == {}, "都市不应有种类特有字段"
+assert not [r for r in wvt._field_rows if r["label"].text()], "都市不应有种类特有字段"
 print("世界观唯一/种类字段 OK")
 
 sdlg = SettingsDialog(win.config, parent=win)

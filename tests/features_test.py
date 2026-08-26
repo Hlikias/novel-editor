@@ -40,19 +40,21 @@ wv = Worldview(book_id=book.id, name="九州", genre="修真")
 wv.id = st.add_worldview(wv)
 st.add_plot_node(PlotNode(book_id=book.id, order=1, name="觉醒", chapter="第1章"))
 
-# 题材模板 / 种类特有字段
+# 题材模板 / 种类特有字段（动态可增删）
 wvt = WorldviewTab(st)
 wvt._clear_form()
 wvt.genre_combo.setCurrentText("修真")
-assert "功法" in wvt.attrs_edit.toPlainText()
-assert "修真境界" in wvt._custom_edits, "修真应有 修真境界 字段"
-assert "核心法则" in wvt._custom_edits
+labels = lambda: [r["label"].text() for r in wvt._field_rows]
+assert "修真境界" in labels(), labels()
+assert "核心法则" in labels()
 wvt._clear_form()
 wvt.genre_combo.setCurrentText("都市")
-assert wvt.attrs_edit.toPlainText().strip() == ""
-assert wvt._custom_edits == {}, "都市不应有种类特有字段"
+assert [l for l in labels() if l] == [], labels()   # 无非空默认字段
 wvt.genre_combo.setCurrentText("玄幻")
-assert "战力等级" in wvt._custom_edits
+assert "战力等级" in labels()
+# 用户自定义字段：添加一行并改名
+wvt._add_field_row("宗门体系", "青云宗")
+assert "宗门体系" in labels()
 print("世界观题材模板/种类字段 OK")
 
 # 关闭在最大化右侧
@@ -68,8 +70,8 @@ win = MainWindow()
 win.show()
 win._set_project(st)
 assert win.overview_view.tree.topLevelItemCount() == 1
-assert win.quote_view.tabs.count() == 2
-print("总览/金句 dock OK")
+assert win.quote_view.tabs.count() == 4   # 成语 / 金句 / 歇后语 / 网络用语
+print("总览/金句/歇后语/网络用语 dock OK")
 
 win.close()
 dlg.close()

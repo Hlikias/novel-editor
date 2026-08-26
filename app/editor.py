@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor, QFont, QPainter, QPen, QTextBlockFormat, QTextCharFormat,
     QTextCursor, QTextDocument, QTextFormat, QTextOption,
@@ -66,15 +66,20 @@ class LineNumberArea(QWidget):
 
 
 class BookmarkGutter(QWidget):
-    """行号左侧的书签栏：点击某行切换书签，已加书签的行显示小旗标。"""
+    """行号左侧的书签栏：单击切换书签，双击已添加书签的行可改名。"""
 
-    GUTTER_W = 16
+    GUTTER_W = 18
 
     def __init__(self, editor: "EditorWidget"):
         super().__init__(editor)
         self._editor = editor
+        self._pending_line = None
+        self._toggle_timer = QTimer(self)   # 延迟确认单击（区分双击改名）
+        self._toggle_timer.setSingleShot(True)
+        self._toggle_timer.setInterval(250)
+        self._toggle_timer.timeout.connect(self._do_toggle)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("点击切换该行书签")
+        self.setToolTip("单击切换该行书签；双击已添加书签的行可修改书签名称")
 
     def sizeHint(self) -> QSize:
         return QSize(self.GUTTER_W, 0)
@@ -108,7 +113,32 @@ class BookmarkGutter(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             y = event.position().toPoint().y()
             cursor = self._editor.cursorForPosition(QPoint(1, y))
-            self._editor.toggle_bookmark_at(cursor.blockNumber() + 1)
+            self._pending_line = cursor.blockNumber() + 1
+            self._toggle_timer.start()   # 延迟确认单击，双击时取消
+
+    def _do_toggle(self):
+        if self._pending_line is not None:
+            line, self._pending_line = self._pending_line, None
+            self._editor.toggle_bookmark_at(line)
+
+    def mouseDoubleClickEvent(self, event):
+        """双击已添加书签的行 → 设置书签名字（取消延迟的单击切换）。"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._toggle_timer.stop()
+            self._pending_line = None
+            y = event.position().toPoint().y()
+            cursor = self._editor.cursorForPosition(QPoint(1, y))
+            line = cursor.blockNumber() + 1
+            if line not in self._editor._bookmarked_lines:
+                return
+            cb = getattr(self._editor, "bookmark_rename_callback", None)
+            cid = getattr(self._editor, "chapter_id", None)
+            if cb is None or cid is None:
+                return
+            from PySide6.QtWidgets import QInputDialog
+            name, ok = QInputDialog.getText(self, "书签命名", f"第 {line} 行的书签名称：")
+            if ok:
+                cb(cid, line, name.strip())
 
 
 class EditorWidget(QTextEdit):
@@ -117,6 +147,7 @@ class EditorWidget(QTextEdit):
     ai_action_requested = Signal(str)   # 右键菜单请求 AI 任务：optimize/expand/continue/condense
     write_requested = Signal()          # AI 写作输入
     query_requested = Signal(str)       # 查询选中设定
+    voice_input_requested = Signal()    # 语音输入
 
     def __init__(self, config: dict, parent=None):
         super().__init__(parent)
@@ -530,6 +561,7 @@ class EditorWidget(QTextEdit):
         menu.addSeparator()
         menu.addAction("🔖 添加/取消书签（当前行）", self._toggle_bookmark_current)
         menu.addAction("⌨ AI 写作输入…", self.write_requested.emit)
+        menu.addAction("🎤 语音输入…", self.voice_input_requested.emit)
         menu.addAction("🔎 查询选中设定…", self._query_selected)
         # 快捷文本
         provider = getattr(self, "quick_texts_provider", None)
@@ -541,6 +573,24 @@ class EditorWidget(QTextEdit):
                 for t in texts:
                     label = t if len(t) <= 24 else t[:24] + "…"
                     sub.addAction(label, lambda _=False, txt=t: self.insertPlainText(txt))
+        # 插件动作
+        plugin_provider = getattr(self, "plugin_actions_provider", None)
+        if plugin_provider is not None:
+            items = plugin_provider() or []
+            if items:
+                menu.addSeparator()
+                by_plugin = {}
+                for pname, item in items:
+                    by_plugin.setdefault(pname, []).append(item)
+                sub = menu.addMenu("🧩 插件")
+                multi = len(by_plugin) > 1
+                for pname, its in by_plugin.items():
+                    psub = sub.addMenu(pname) if multi else sub
+                    for it in its:
+                        act = psub.addAction(it["text"])
+                        cb = it.get("callback")
+                        if cb:
+                            act.triggered.connect(lambda _=False, f=cb, ed=self: f(ed))
         menu.exec(event.globalPos())
 
     def _toggle_bookmark_current(self):
