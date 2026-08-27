@@ -1433,6 +1433,7 @@ class MainWindow(QMainWindow):
         self.title_bar = TitleBar(self, menus=self._menus)
         self.title_bar.add_menu("视图", view_menu)
         self.setMenuWidget(self.title_bar)
+        self._build_quick_toolbar()   # 菜单下方：一排设定弹窗入口（只显示图标）
 
         # 帮助菜单：工具入口（错别字检查 / 大纲 / 番茄钟 / 写作时间）
         self._help_menu.addSeparator()
@@ -1446,6 +1447,42 @@ class MainWindow(QMainWindow):
         from .dialogs.quote_search_dialog import QuoteSearchDialog
         dlg = QuoteSearchDialog(self)
         dlg.exec()
+
+    def _build_quick_toolbar(self):
+        """顶栏下方快捷工具栏：一排设定弹窗入口，只显示图标（悬停有说明）。"""
+        from PySide6.QtCore import QSize
+        from PySide6.QtWidgets import QToolBar
+        tb = QToolBar("快捷工具", self)
+        tb.setObjectName("quickToolBar")
+        tb.setMovable(False)
+        tb.setFloatable(False)
+        tb.setIconSize(QSize(20, 20))
+        tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        tb.setStyleSheet(
+            "QToolBar{background:transparent;border:none;spacing:2px;padding:2px 4px;}"
+            "QToolBar QToolButton{background:transparent;border-radius:6px;padding:3px;}"
+            "QToolBar QToolButton:hover{background:rgba(128,128,128,40);}"
+        )
+        st = self.style()
+
+        def add(text: str, slot, pixmap) -> None:
+            a = QAction(text, self)
+            a.setIcon(st.standardIcon(pixmap))
+            a.setToolTip(text)
+            a.triggered.connect(slot)
+            tb.addAction(a)
+
+        SP = QStyle.StandardPixmap
+        add("章节管理…", self.show_chapter_dialog, SP.SP_FileIcon)
+        add("大纲 / 世界观 / 角色管理…", lambda: self.show_character_dialog(2), SP.SP_DirOpenIcon)
+        add("创作规划…", lambda: self._show_planning_dialog(True), SP.SP_FileDialogListView)
+        add("本章速览", lambda: (self.snap_dock.show(), self.snap_dock.raise_()), SP.SP_FileDialogInfoView)
+        add("备份项目…", self.backup_project, SP.SP_DialogSaveButton)
+        add("从备份恢复…", self.restore_backup, SP.SP_ArrowBack)
+        add("全文查找…", self.show_fulltext_search, SP.SP_FileDialogContentsView)
+        add("设置…", lambda: self.show_settings_dialog(), SP.SP_FileDialogDetailedView)
+        self.quick_toolbar = tb
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
 
     def _activate_bottom_tab(self, widget):
         self.log_dock.show()
