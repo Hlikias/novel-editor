@@ -35,8 +35,8 @@ assert tb.iconSize().width() <= 16, "图标应小一点"
 acts = [a for a in tb.actions()]
 buttons = [a for a in acts if a.text() and not a.isSeparator()]
 seps = [a for a in acts if a.isSeparator()]
-assert len(buttons) >= 8, len(buttons)
-assert len(seps) >= 3, "不同类别应有分隔线"
+assert len(buttons) >= 18, len(buttons)
+assert len(seps) >= 5, "不同类别应有分隔线"
 for a in buttons:
     assert not a.icon().isNull(), f"{a.text()} 应有图标"
     assert a.toolTip(), f"{a.text()} 应有悬停说明"
@@ -54,6 +54,10 @@ assert any("全文查找" in t for t in names)
 assert any("项目信息" in t for t in names), "应包含项目里的 action"
 assert any("一致性" in t for t in names)
 assert any("速览悬浮窗" in t for t in names)
+assert any("Git" in t for t in names)
+assert any("番茄钟" in t for t in names)
+assert any("新建章节" in t for t in names)
+assert any("AI 写作输入" in t for t in names)
 
 # 2) 触发"本章速览"（不 exec 的安全入口）→ dock 显示
 snap_act = next(a for a in buttons if "本章速览" in a.text())

@@ -1626,22 +1626,34 @@ class MainWindow(QMainWindow):
         def sep():
             tb.addSeparator()
 
-        # 章节与设定
+        # ── 章节与设定 ──
+        add("🆕 新建章节", self.new_chapter, "🆕")
         add("🗂 章节管理…", self.show_chapter_dialog, "🗂")
         add("👥 大纲 / 世界观 / 角色管理…", lambda: self.show_character_dialog(2), "👥")
         add("📐 创作规划…", lambda: self._show_planning_dialog(True), "📐")
         sep()
-        # 写作辅助
+        # ── AI 写作 ──
+        add("📖 AI 生成章节…", self._show_chapter_gen_dialog, "📖")
+        add("⌨ AI 写作输入…", self.show_ai_input_dialog, "⌨")
+        add("✍️ 提炼本章要点", lambda: self._author_tool("refine"), "✍️")
+        add("📖 前情提要…", lambda: self._author_tool("summary"), "🧭")
+        sep()
+        # ── 写作辅助 ──
         add("📋 本章速览", lambda: (self.snap_dock.show(), self.snap_dock.raise_()), "📋")
         add("🪟 速览悬浮窗", self._toggle_snap_float, "🪟")
         add("🔗 一致性检查", lambda: self._activate_bottom_tab(self.consistency_view), "🔗")
+        add("📈 写作目标", lambda: self._activate_bottom_tab(self.goal_view), "📈")
+        add("🍅 番茄钟", lambda: self._activate_bottom_tab(self.pomodoro_view), "🍅")
         sep()
-        # 数据安全
+        # ── 数据安全 ──
         add("💾 备份项目…", self.backup_project, "💾")
         add("♻️ 从备份恢复…", self.restore_backup, "♻️")
+        add("🐙 Git 版本管理…", self.show_git_dialog, "🐙")
         sep()
-        # 工具
+        # ── 工具 ──
         add("🔍 全文查找…", self.show_fulltext_search, "🔍")
+        add("🗂 词库检索…", self._open_quote_search, "🗂")
+        add("🕵️ 错别字/违禁词检查", lambda: self._activate_bottom_tab(self.check_view), "🕵️")
         add("ℹ️ 项目信息…", self.show_project_info_dialog, "ℹ️")
         sep()
         add("⚙️ 设置…", lambda: self.show_settings_dialog(), "⚙️")
