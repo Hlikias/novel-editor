@@ -139,6 +139,24 @@ class SettingsDialog(GradientDialog):
         self.system_edit = QLineEdit(api.get("system_prompt", ""))
         api_form.addRow("系统提示词", self.system_edit)
 
+        # 语音识别引擎（大模型可选）
+        voice = config.get("voice", {})
+        self.voice_engine_combo = QComboBox()
+        self.voice_engine_combo.addItem("本地识别（Windows 内置，离线）", "local")
+        self.voice_engine_combo.addItem("云端 Whisper（大模型，需 API + 允许联网）", "cloud")
+        self.voice_engine_combo.addItem("本地 Whisper（faster-whisper，需安装+首次联网下载模型）", "whisper_local")
+        idx = self.voice_engine_combo.findData(voice.get("engine", "local"))
+        self.voice_engine_combo.setCurrentIndex(max(0, idx))
+        api_form.addRow("语音识别引擎", self.voice_engine_combo)
+        vhint = QLabel(
+            "· 本地：离线、隐私好，识别准确度一般\n"
+            "· 云端 Whisper：准确度高，语音会上传（严格隐私模式下不可用）\n"
+            "· 本地 Whisper：准确度高且离线；需先执行 pip install faster-whisper，"
+            "首次识别自动下载模型（约几百 MB）")
+        vhint.setWordWrap(True)
+        vhint.setObjectName("mutedLabel")
+        api_form.addRow("", vhint)
+
         hint = QLabel("支持任何 OpenAI 兼容接口（OpenAI / DeepSeek / 通义 / 本地 Ollama 等）。")
         hint.setWordWrap(True)
         hint.setObjectName("mutedLabel")
@@ -351,6 +369,7 @@ class SettingsDialog(GradientDialog):
         api["model"] = self.model_combo.currentText().strip()
         api["temperature"] = self.temp_spin.value()
         api["system_prompt"] = self.system_edit.text().strip()
+        self.config.setdefault("voice", {})["engine"] = self.voice_engine_combo.currentData()
 
         ed = self.config.setdefault("editor", {})
         ed["tab_size"] = self.tab_size_spin.value()
