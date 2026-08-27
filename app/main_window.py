@@ -2432,8 +2432,13 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "语音输入", "请先打开一个章节。")
             return
         from .voice_input import VoiceInputDialog
-        dlg = VoiceInputDialog(editor, parent=self)
+        dlg = VoiceInputDialog(editor, parent=self,
+                               ai_provider=self._ai_voice_polish)
         dlg.exec()
+
+    def _ai_voice_polish(self, prompt: str, done_cb):
+        """语音识别文字 → LLM 润色。"""
+        self.ai_panel.run_task(prompt, done_cb, stream=False)
 
     def show_ai_input_dialog(self):
         if not hasattr(self, "ai_input_dialog") or self.ai_input_dialog is None:
