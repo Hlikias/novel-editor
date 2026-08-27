@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """验证状态栏：本章字数 / 全书总字数 / 段落 / 行数。"""
 import os
 import sys
@@ -40,8 +40,11 @@ app.processEvents()
 win._update_status()
 
 print("words_label:", win.words_label.text())
+print("para_label:", win.para_label.text())
 print("total_label:", win.total_label.text())
-assert "本章" in win.words_label.text() and "段落" in win.words_label.text()
+print("today_label:", win.today_label.text())
+assert "本章" in win.words_label.text()
+assert "段落" in win.para_label.text() and "行" in win.para_label.text()
 assert "全书" in win.total_label.text() and "章" in win.total_label.text()
 
 # 全书总字数 = 其他章存档 + 本章实时

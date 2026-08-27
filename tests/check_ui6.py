@@ -62,14 +62,18 @@ win._sync_status_items()
 check("book 可见", win.book_label.isVisible())
 check("chars 可见", win.words_label.isVisible())
 check("pos 隐藏", not win.pos_label.isVisible())
+check("para 隐藏", not win.para_label.isVisible())
 check("total 隐藏", not win.total_label.isVisible())
+check("today 隐藏", not win.today_label.isVisible())
 check("enc 隐藏", not win.enc_label.isVisible())
 check("mod 隐藏", not win.mod_label.isVisible())
-win.config.setdefault("app", {})["status_items"] = ["book", "pos", "chars", "total", "enc", "mod"]
+win.config.setdefault("app", {})["status_items"] = ["book", "pos", "chars", "para", "total", "today", "enc", "mod"]
 win._sync_status_items()
 check("全部恢复可见", all(w.isVisible() for w in (
-    win.book_label, win.pos_label, win.words_label, win.total_label,
-    win.enc_label, win.mod_label)))
+    win.book_label, win.pos_label, win.words_label, win.para_label,
+    win.total_label, win.today_label, win.enc_label, win.mod_label)))
+# 今日目标/段落行数字段已填充
+check("today 内容", "今日" in win.today_label.text() and "字" in win.today_label.text())
 
 # ---------- D：空状态引导 ----------
 def vis(w):
@@ -80,12 +84,14 @@ def vis(w):
 sv = StatsView()
 sv.set_storage(None)
 check("StatsView 无项目提示", vis(sv.empty_hint) and "未打开项目" in sv.empty_hint.text())
+check("StatsView 无项目有按钮", sv.empty_actions.isEnabled() and vis(sv.new_btn))
 # 有项目但无章节
 d = tempfile.mkdtemp()
 book = Book(title="空书", author="A")
 st = Storage.create_project(book, d)
 sv.set_storage(st)
 check("StatsView 无章节提示", vis(sv.empty_hint) and "还没有章节" in sv.empty_hint.text())
+check("StatsView 有项目按钮禁用", not sv.empty_actions.isEnabled())
 c1 = Chapter(book_id=book.id, title="第一章", content="　　内容。")
 c1.id = st.add_chapter(c1)
 sv.set_storage(st)
@@ -102,17 +108,28 @@ q.do_search()
 check("SearchView 有结果隐藏提示", q.empty_hint.isHidden() and q.results.count() >= 1)
 q.set_storage(None)
 check("SearchView 无项目提示", vis(q.empty_hint) and "打开项目" in q.empty_hint.text())
+check("SearchView 无项目有按钮", q.empty_actions.isEnabled() and vis(q.new_btn))
 
 # 一致性视图：无项目/有项目未扫描/扫描有结果
 cv = ConsistencyView()
 cv.set_storage(None)
 check("ConsistencyView 无项目提示", vis(cv.empty_hint) and "打开项目" in cv.empty_hint.text())
+check("ConsistencyView 无项目有按钮", cv.empty_actions.isEnabled() and vis(cv.new_btn))
 cv.set_storage(st)
 check("ConsistencyView 未扫描提示", vis(cv.empty_hint) and "还没扫描过" in cv.empty_hint.text())
 check("ConsistencyView 未扫描时 tab 隐藏", cv.tabs.isHidden())
+check("ConsistencyView 有项目按钮禁用", not cv.empty_actions.isEnabled())
 cv.do_scan()
 check("ConsistencyView 扫描后 tab 显示", vis(cv.tabs))
 check("ConsistencyView 扫描后提示隐藏", cv.empty_hint.isHidden())
+
+# 信号接线：按钮点击发出信号（主窗口已连接）
+fired = []
+sv.new_project_requested.connect(lambda: fired.append("np"))
+sv.open_project_requested.connect(lambda: fired.append("op"))
+sv.new_btn.click()
+sv.open_btn.click()
+check("StatsView 按钮信号", fired == ["np", "op"])
 
 # 编辑器与弹窗收尾
 ed.setParent(None)

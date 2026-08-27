@@ -70,12 +70,14 @@ class SettingsDialog(GradientDialog):
         # ---- F：状态栏显示项 ----
         self.status_checks: dict[str, QCheckBox] = {}
         status_items = app_cfg.get("status_items")
-        status_items = status_items if isinstance(status_items, list) else ["book", "pos", "chars", "total", "enc", "mod"]
+        status_items = status_items if isinstance(status_items, list) else ["book", "pos", "chars", "para", "total", "today", "enc", "mod"]
         status_labels = {
             "book": "项目名称",
-            "pos": "光标位置",
+            "pos": "行列位置",
             "chars": "本章字数",
+            "para": "段落行数",
             "total": "全书字数与章节数",
+            "today": "今日写作目标",
             "enc": "文件编码",
             "mod": "保存状态",
         }

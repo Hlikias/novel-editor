@@ -38,7 +38,7 @@ DEFAULTS: dict = {
         "open_recent_on_start": False,    # 启动时自动打开最近项目
         "ui_scale": 1.0,                  # 界面字号缩放（0.9~1.3，适配高分屏）
         "status_items": [                 # 状态栏显示项（F 项：可勾选配置）
-            "book", "pos", "chars", "total", "enc", "mod",
+            "book", "pos", "chars", "para", "total", "today", "enc", "mod",
         ],
         "quick_texts": [                  # 快捷文本（编辑器右键一键插入）
             "――――――――――――",

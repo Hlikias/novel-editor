@@ -1380,6 +1380,8 @@ class MainWindow(QMainWindow):
         self.stats_dock = QDockWidget("📊 统计", self)
         self.stats_dock.setObjectName("stats_dock")
         self.stats_view = StatsView()
+        self.stats_view.new_project_requested.connect(self.new_project)
+        self.stats_view.open_project_requested.connect(self.open_project)
         self.stats_dock.setWidget(self.stats_view)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.stats_dock)
 
@@ -1437,6 +1439,8 @@ class MainWindow(QMainWindow):
         from .consistency_view import ConsistencyView
         self.consistency_view = ConsistencyView()
         self.consistency_view.open_requested.connect(lambda cid, ln: self.open_chapter(cid))
+        self.consistency_view.new_project_requested.connect(self.new_project)
+        self.consistency_view.open_project_requested.connect(self.open_project)
         self.bottom_tabs.addTab(self.consistency_view, "🔗 一致性")
 
         # 底部：番茄钟
@@ -1471,6 +1475,8 @@ class MainWindow(QMainWindow):
         self.search_dock.setMinimumHeight(60)   # 底部 dock 可拉矮
         self.search_view = SearchView()
         self.search_view.open_requested.connect(self.open_chapter)
+        self.search_view.new_project_requested.connect(self.new_project)
+        self.search_view.open_project_requested.connect(self.open_project)
         self.search_dock.setWidget(self.search_view)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.search_dock)
 
@@ -1869,20 +1875,25 @@ class MainWindow(QMainWindow):
         self.book_label = QLabel("未打开项目")
         self.pos_label = QLabel("行 1, 列 1")
         self.words_label = QLabel("本章 0 字")
+        self.para_label = QLabel("段落 0 · 行 0")
         self.total_label = QLabel("全书 0 字 · 0 章")
+        self.today_label = QLabel("✍️ 今日 0/1000 字")
         self.enc_label = QLabel("UTF-8")
         self.mod_label = QLabel("")
-        # F：状态栏显示项（配置可勾选）——key → (widget, 名称)
+        # F：状态栏显示项（配置可勾选）——key → widget
         self._status_widgets = {
             "book": self.book_label,
-            "pos": self.pos_label,
-            "chars": self.words_label,
-            "total": self.total_label,
+            "pos": self.pos_label,        # 行列
+            "chars": self.words_label,    # 本章字数
+            "para": self.para_label,      # 段落行数
+            "total": self.total_label,    # 全书字数与章节数
+            "today": self.today_label,    # 今日写作目标
             "enc": self.enc_label,
             "mod": self.mod_label,
         }
         for w in (self.book_label, self.pos_label, self.words_label,
-                  self.total_label, self.enc_label, self.mod_label):
+                  self.para_label, self.total_label, self.today_label,
+                  self.enc_label, self.mod_label):
             w.setContentsMargins(8, 0, 8, 0)
             bar.addWidget(w, 1 if w is self.book_label else 0)
         bar.addPermanentWidget(QLabel("PySide6"), 0)
@@ -1891,7 +1902,7 @@ class MainWindow(QMainWindow):
     def _sync_status_items(self):
         """按配置的 status_items 隐藏/显示状态栏各项（F 项）。"""
         items = self.config.get("app", {}).get("status_items")
-        items = items if isinstance(items, list) else ["book", "pos", "chars", "total", "enc", "mod"]
+        items = items if isinstance(items, list) else ["book", "pos", "chars", "para", "total", "today", "enc", "mod"]
         for key, widget in getattr(self, "_status_widgets", {}).items():
             widget.setVisible(key in items)
 
@@ -3152,6 +3163,7 @@ class MainWindow(QMainWindow):
         # 今日写作字数（写作目标进度）
         today_words = self.time_tracker.stats().get("today", 0)
         goal = int(self.config.get("app", {}).get("daily_goal", 1000) or 1000)
+        self.today_label.setText(f"✍️ 今日 {today_words}/{goal} 字")
         editor = self.current_editor()
         if editor is not None:
             self.pos_label.setText(editor.current_position_text())
@@ -3159,9 +3171,9 @@ class MainWindow(QMainWindow):
             lines = editor.document().blockCount()
             cid = getattr(editor, "chapter_id", None)
             self.words_label.setText(
-                f"本章 {stats['total']} 字（中文 {stats['cjk']} / 英文 {stats['en']}"
-                f" · 段落 {stats['paragraphs']} · 行 {lines}）"
+                f"本章 {stats['total']} 字（中文 {stats['cjk']} / 英文 {stats['en']}）"
             )
+            self.para_label.setText(f"段落 {stats['paragraphs']} · 行 {lines}")
             if self.storage is not None:
                 saved_others = self.storage.total_words(exclude_id=cid)
                 self.total_label.setText(
@@ -3194,6 +3206,7 @@ class MainWindow(QMainWindow):
         else:
             self.pos_label.setText("行 1, 列 1")
             self.words_label.setText("本章 0 字")
+            self.para_label.setText("段落 0 · 行 0")
             if self.storage is not None:
                 self.total_label.setText(
                     f"全书 {self.storage.total_words()} 字 · "

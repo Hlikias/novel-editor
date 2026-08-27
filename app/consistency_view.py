@@ -15,6 +15,9 @@ class ConsistencyView(QWidget):
     """🔗 一致性：扫描全书人名/设定名的疑似不一致 + 角色出场统计。"""
 
     open_requested = Signal(int, int)   # chapter_id, line
+    # D 项：空状态引导按钮信号（由主窗口接新建/打开项目）
+    new_project_requested = Signal()
+    open_project_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -47,7 +50,7 @@ class ConsistencyView(QWidget):
         self.tabs.addTab(self.appear_list, "角色出场")
         lay.addWidget(self.tabs, 1)
 
-        # D 项：空状态引导
+        # D 项：空状态引导 + 新建/打开按钮
         self.empty_hint = QLabel(
             "🔗 还没扫描过。\n\n"
             "· 「扫描全书一致性」：对照角色库/设定库，找出正文里疑似写错的人名设定名\n"
@@ -59,6 +62,19 @@ class ConsistencyView(QWidget):
         self.empty_hint.hide()
         lay.addWidget(self.empty_hint, 1)
 
+        self.empty_actions = QHBoxLayout()
+        self.empty_actions.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_actions.addStretch(1)
+        self.new_btn = QPushButton("➕ 新建项目")
+        self.new_btn.clicked.connect(self.new_project_requested.emit)
+        self.open_btn = QPushButton("📂 打开项目…")
+        self.open_btn.clicked.connect(self.open_project_requested.emit)
+        self.empty_actions.addWidget(self.new_btn)
+        self.empty_actions.addWidget(self.open_btn)
+        self.empty_actions.addStretch(1)
+        lay.addLayout(self.empty_actions)
+        self.empty_actions.setEnabled(False)
+
     def set_storage(self, storage):
         self.storage = storage
         self.hint_list.clear()
@@ -67,6 +83,7 @@ class ConsistencyView(QWidget):
             self.tabs.hide()
             self.empty_hint.setText("📂 请先打开项目（Ctrl+O），再扫描全书一致性。")
             self.empty_hint.show()
+            self.empty_actions.setEnabled(True)
         else:
             # 尚未扫描：隐藏空 tab，展示引导（扫描后由 do_scan/do_appearances 恢复）
             self.tabs.hide()
@@ -76,6 +93,7 @@ class ConsistencyView(QWidget):
                 "· 「角色出场统计」：看谁好久没出场，避免角色断线"
             )
             self.empty_hint.show()
+            self.empty_actions.setEnabled(False)
 
     def do_scan(self):
         if not self.storage:
@@ -84,6 +102,7 @@ class ConsistencyView(QWidget):
         self.hint_list.clear()
         hints = scan_consistency(self.storage)
         self.tabs.show()
+        self.empty_actions.setEnabled(False)
         if not hints:
             self.hint_list.addItem("✅ 未发现与角色库/设定库名字疑似不一致的地方。")
             self.status.setText("扫描完成：未发现不一致")
@@ -111,6 +130,7 @@ class ConsistencyView(QWidget):
         self.appear_list.clear()
         rows = count_appearances(self.storage)
         self.tabs.show()
+        self.empty_actions.setEnabled(False)
         if not rows:
             self.appear_list.addItem("（角色库为空或没有正文）")
             self.status.setText("角色出场统计完成")

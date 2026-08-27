@@ -24,6 +24,10 @@ DEFAULT_CHECK_WORDS = [
 class StatsView(QWidget):
     """📊 统计视图：本书章节数与字数概览。"""
 
+    # D 项：空状态引导按钮信号（由主窗口接新建/打开项目）
+    new_project_requested = Signal()
+    open_project_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.storage = None
@@ -41,7 +45,7 @@ class StatsView(QWidget):
         self.tree.setColumnWidth(0, 130)
         layout.addWidget(self.tree, 1)
 
-        # D 项：空状态引导（无章节时提示下一步）
+        # D 项：空状态引导（无章节时提示下一步 + 新建/打开按钮）
         self.empty_hint = QLabel(
             "📝 还没有章节。\n\n"
             "· 点击左侧「➕ 新建章节」开始写作\n"
@@ -54,25 +58,41 @@ class StatsView(QWidget):
         self.empty_hint.hide()
         layout.addWidget(self.empty_hint, 1)
 
+        self.empty_actions = QHBoxLayout()
+        self.empty_actions.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_actions.addStretch(1)
+        self.new_btn = QPushButton("➕ 新建项目")
+        self.new_btn.clicked.connect(self.new_project_requested.emit)
+        self.open_btn = QPushButton("📂 打开项目…")
+        self.open_btn.clicked.connect(self.open_project_requested.emit)
+        self.empty_actions.addWidget(self.new_btn)
+        self.empty_actions.addWidget(self.open_btn)
+        self.empty_actions.addStretch(1)
+        layout.addLayout(self.empty_actions)
+        self.empty_actions.setEnabled(False)
+
     def set_storage(self, storage):
         self.storage = storage
         self.refresh()
+
+    def _show_empty(self, text: str, with_buttons: bool):
+        self.empty_hint.setText(text)
+        self.empty_hint.show()
+        self.empty_actions.setEnabled(with_buttons)
 
     def refresh(self):
         if not self.storage:
             self.summary.setText("未打开项目")
             self.tree.clear()
             self.tree.hide()
-            self.empty_hint.setText("📂 未打开项目。\n\n点击「打开项目」或 Ctrl+O 载入一本小说。")
-            self.empty_hint.show()
+            self._show_empty("📂 未打开项目。\n\n点击「打开项目」或 Ctrl+O 载入一本小说。", True)
             return
         book = self.storage.get_book()
         if book is None:
             self.summary.setText("项目数据缺失")
             self.tree.clear()
             self.tree.hide()
-            self.empty_hint.setText("⚠ 项目数据缺失。")
-            self.empty_hint.show()
+            self._show_empty("⚠ 项目数据缺失。", True)
             return
         chapters = self.storage.list_chapters()
         total = sum(c.word_count for c in chapters)
@@ -85,21 +105,25 @@ class StatsView(QWidget):
         if chapters:
             self.tree.show()
             self.empty_hint.hide()
+            self.empty_actions.setEnabled(False)
         else:
             self.tree.hide()
-            self.empty_hint.setText(
+            self._show_empty(
                 "📝 还没有章节。\n\n"
                 "· 点击左侧「➕ 新建章节」开始写作\n"
                 "· 或 Ctrl+Shift+C 打开章节管理批量建章\n"
-                "· 写下的每一章都会自动统计字数"
+                "· 写下的每一章都会自动统计字数",
+                False,
             )
-            self.empty_hint.show()
 
 
 class SearchView(QWidget):
     """🔍 全文搜索：搜索所有章节标题与正文，双击结果打开章节。"""
 
     open_requested = Signal(int)
+    # D 项：空状态引导按钮信号（由主窗口接新建/打开项目）
+    new_project_requested = Signal()
+    open_project_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -126,7 +150,7 @@ class SearchView(QWidget):
         self.status.setObjectName("mutedLabel")
         layout.addWidget(self.status)
 
-        # D 项：空状态引导（未搜索 / 无结果时）
+        # D 项：空状态引导（未搜索 / 无结果时）+ 新建/打开按钮
         self.empty_hint = QLabel(
             "🔍 输入关键词（支持标题/摘要/正文），回车或点「搜索」。\n\n"
             "例如：主角名、地名、某句台词——快速定位到对应章节。"
@@ -137,6 +161,19 @@ class SearchView(QWidget):
         self.empty_hint.hide()
         layout.addWidget(self.empty_hint, 1)
 
+        self.empty_actions = QHBoxLayout()
+        self.empty_actions.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_actions.addStretch(1)
+        self.new_btn = QPushButton("➕ 新建项目")
+        self.new_btn.clicked.connect(self.new_project_requested.emit)
+        self.open_btn = QPushButton("📂 打开项目…")
+        self.open_btn.clicked.connect(self.open_project_requested.emit)
+        self.empty_actions.addWidget(self.new_btn)
+        self.empty_actions.addWidget(self.open_btn)
+        self.empty_actions.addStretch(1)
+        layout.addLayout(self.empty_actions)
+        self.empty_actions.setEnabled(False)
+
     def set_storage(self, storage):
         self.storage = storage
         self.results.clear()
@@ -144,6 +181,9 @@ class SearchView(QWidget):
         if storage is None:
             self.empty_hint.setText("📂 请先打开项目（Ctrl+O）再搜索。")
             self.empty_hint.show()
+            self.empty_actions.setEnabled(True)
+        else:
+            self.empty_actions.setEnabled(False)
 
     def do_search(self):
         self.results.clear()
@@ -151,12 +191,14 @@ class SearchView(QWidget):
             self.status.setText("请先打开项目")
             self.empty_hint.setText("📂 请先打开项目（Ctrl+O）再搜索。")
             self.empty_hint.show()
+            self.empty_actions.setEnabled(True)
             return
         kw = self.input.text().strip().lower()
         if not kw:
             self.status.setText("请输入关键词")
             self.empty_hint.setText("🔍 输入关键词（支持标题/摘要/正文），回车或点「搜索」。")
             self.empty_hint.show()
+            self.empty_actions.setEnabled(False)
             return
         count = 0
         for ch in self.storage.list_chapters():
@@ -177,6 +219,7 @@ class SearchView(QWidget):
         self.status.setText(f"找到 {count} 个章节")
         if count:
             self.empty_hint.hide()
+            self.empty_actions.setEnabled(False)
         else:
             self.empty_hint.setText(
                 f"没有找到「{self.input.text().strip()}」。\n\n"
@@ -185,6 +228,7 @@ class SearchView(QWidget):
                 "· 或先写几章内容，让全书可搜"
             )
             self.empty_hint.show()
+            self.empty_actions.setEnabled(False)
 
     def _open_result(self, item):
         ch_id = item.data(0x0100)

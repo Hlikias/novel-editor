@@ -54,9 +54,11 @@ print("章节数:", len(st.list_chapters()))
 
 # 状态栏：本章字数 / 全书总字数 / 段落 / 行数
 win._update_status()
-assert "本章" in win.words_label.text() and "段落" in win.words_label.text()
+assert "本章" in win.words_label.text()
+assert "段落" in win.para_label.text() and "行" in win.para_label.text()
 assert "全书" in win.total_label.text() and "章" in win.total_label.text()
-print("状态栏统计 OK:", win.words_label.text())
+assert "今日" in win.today_label.text() and "字" in win.today_label.text()
+print("状态栏统计 OK:", win.words_label.text(), "|", win.para_label.text())
 
 dlg = ChapterDialog(st, win)
 dlg.show()
