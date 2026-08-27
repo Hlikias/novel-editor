@@ -12,11 +12,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QStringListModel
 from PySide6.QtGui import (
     QColor, QFont, QPainter, QPen, QTextBlockFormat, QTextCharFormat,
     QTextCursor, QTextDocument, QTextFormat, QTextOption,
 )
-from PySide6.QtWidgets import QMenu, QTextEdit, QWidget
+from PySide6.QtWidgets import (
+    QFrame, QListWidget, QMenu, QTextEdit, QVBoxLayout, QWidget,
+)
 
 from .theme import PALETTE
 
@@ -144,6 +147,51 @@ class BookmarkGutter(QWidget):
                 cb(cid, line, name.strip())
 
 
+class _NamePopup(QFrame):
+    """人名自动补全的下拉列表（自建 Popup，避免 QCompleter 崩溃问题）。"""
+
+    def __init__(self, editor: "EditorWidget"):
+        super().__init__(editor, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        self._editor = editor
+        self._prefix = ""
+        self.setObjectName("namePopup")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(2, 2, 2, 2)
+        self.list = QListWidget()
+        self.list.setFixedWidth(150)
+        self.list.itemClicked.connect(self._pick)
+        lay.addWidget(self.list)
+        self.setStyleSheet(
+            "QFrame#namePopup{background:#FFFFFF;border:1px solid #C6DCCF;"
+            "border-radius:6px;}"
+            "QListWidget{background:transparent;border:none;}"
+            "QListWidget::item{padding:3px 8px;}"
+            "QListWidget::item:selected{background:#D9F2E5;color:#245A40;}"
+        )
+
+    def show_for(self, prefix: str, names: list[str], cursor_rect):
+        self._prefix = prefix
+        self.list.clear()
+        self.list.addItems(names)
+        self.list.setCurrentRow(0)
+        gp = self._editor.viewport().mapToGlobal(cursor_rect.bottomLeft())
+        self.move(gp.x(), gp.y() + 4)
+        self.adjustSize()
+        self.show()
+        self.raise_()
+
+    def selected(self) -> str:
+        item = self.list.currentItem()
+        return item.text() if item else ""
+
+    def move_selection(self, delta: int):
+        r = self.list.currentRow() + delta
+        self.list.setCurrentRow(max(0, min(self.list.count() - 1, r)))
+
+    def _pick(self, item):
+        self._editor._insert_completion(item.text())
+
+
 class EditorWidget(QTextEdit):
     """主编辑器控件（富文本，支持 Word 常用格式）。"""
 
@@ -205,7 +253,11 @@ class EditorWidget(QTextEdit):
             lambda *a: self._apply_viewport_geometry())
         # 光标移动 / 文本变化时刷新当前行高亮（只连接一次，避免重复连接累积）
         self.cursorPositionChanged.connect(self._update_extra_selections)
+        self.cursorPositionChanged.connect(self._maybe_typewriter_center)
         self.textChanged.connect(self._update_extra_selections)
+        # 人物名自动补全（A）：自建 Popup（QCompleter 与 QTextEdit 组合会崩溃）
+        self.names_provider = None   # () -> list[str]，主窗口注入角色名
+        self._name_popup = _NamePopup(self)
         # 恢复用户手动拖拽过的页边距（None = 自动调整）
         mm = self.config.get("editor", {}).get("manual_page_margin")
         self._manual_margin = float(mm) if mm is not None else None
@@ -557,6 +609,12 @@ class EditorWidget(QTextEdit):
         self.ensureCursorVisible()   # QTextEdit 无 centerCursor
         self.setFocus()
 
+    def _toggle_typewriter(self, checked: bool):
+        """打字机模式开关（写配置并即时生效）。"""
+        self.config.setdefault("editor", {})["typewriter"] = bool(checked)
+        if checked:
+            self._center_current_line()
+
     # ---------- 行号显示开关 ----------
     def _line_numbers_visible(self) -> bool:
         return bool(self.config.get("editor", {}).get("show_line_numbers", True))
@@ -568,10 +626,59 @@ class EditorWidget(QTextEdit):
         if visible:
             self.line_number_area.update()
 
-    # ---------- 按键行为：Tab / 回车 ----------
+    # ---------- 按键行为：Tab / 回车 / 智能标点 / 段落操作 ----------
     def keyPressEvent(self, event):
         editor_cfg = self.config.get("editor", {})
         key = event.key()
+        mods = event.modifiers()
+
+        # A. 补全弹窗打开时的按键（上/下选择，Enter/Tab 插入，Esc 关闭）
+        if self._name_popup.isVisible():
+            if key == Qt.Key_Down:
+                self._name_popup.move_selection(1)
+                return
+            if key == Qt.Key_Up:
+                self._name_popup.move_selection(-1)
+                return
+            if key in (Qt.Key_Enter, Qt.Key_Return, Qt.Key_Tab):
+                name = self._name_popup.selected()
+                self._name_popup.hide()
+                if name:
+                    self._insert_completion(name)
+                return
+            if key == Qt.Key_Escape:
+                self._name_popup.hide()
+                return
+            self._name_popup.hide()
+
+        # G. 段落操作快捷键
+        if mods & Qt.KeyboardModifier.AltModifier and key == Qt.Key_Up:
+            self._move_block(-1)
+            return
+        if mods & Qt.KeyboardModifier.AltModifier and key == Qt.Key_Down:
+            self._move_block(1)
+            return
+        if mods & Qt.KeyboardModifier.ControlModifier and key == Qt.Key_D:
+            self._delete_block()
+            return
+        if mods & Qt.KeyboardModifier.ControlModifier and key in (Qt.Key_Return, Qt.Key_Enter):
+            self._split_block()
+            return
+
+        # F. 智能标点（可配置）
+        if editor_cfg.get("auto_pair", True):
+            if key in (Qt.Key_QuoteDbl, Qt.Key_QuoteLeft) and not mods:
+                pair = "\u201c\u201d" if key == Qt.Key_QuoteDbl else "\u2018\u2019"
+                self.insertPlainText(pair)
+                c = self.textCursor()
+                c.movePosition(QTextCursor.MoveOperation.Left,
+                               QTextCursor.MoveMode.MoveAnchor, 1)
+                self.setTextCursor(c)
+                return
+            if key == Qt.Key_Period and not mods and self._smart_punct("."):
+                return
+            if key == Qt.Key_Minus and not mods and self._smart_punct("-"):
+                return
 
         if key in (Qt.Key_Tab,):
             if editor_cfg.get("tab_uses_spaces", True):
@@ -588,6 +695,165 @@ class EditorWidget(QTextEdit):
             return
 
         super().keyPressEvent(event)
+        self._maybe_name_complete()
+
+    # ---------- F. 智能标点辅助 ----------
+    def _smart_punct(self, ch: str):
+        """输入 . 或 - 时，三个点/两个短横转成省略号/破折号。"""
+        if ch == ".":
+            if self._text_before(2) == "..":
+                self._backspace(2)
+                self.insertPlainText("……")
+                return True
+        elif ch == "-":
+            if self._text_before(1) == "-":
+                self._backspace(1)
+                self.insertPlainText("——")
+                return True
+        return False
+
+    def _text_before(self, n: int) -> str:
+        c = self.textCursor()
+        start = c.position() - n
+        if start < 0:
+            return ""
+        c.setPosition(start)
+        c.setPosition(start + n, QTextCursor.MoveMode.KeepAnchor)
+        return c.selectedText()
+
+    def _backspace(self, n: int):
+        c = self.textCursor()
+        for _ in range(n):
+            c.deletePreviousChar()
+
+    # ---------- G. 段落操作 ----------
+    def _move_block(self, delta: int):
+        """整段上移/下移（与相邻段落交换）。"""
+        cursor = self.textCursor()
+        block = cursor.block()
+        target = block.next() if delta > 0 else block.previous()
+        if not target.isValid():
+            return
+        a, b = block.text(), target.text()
+        pos = cursor.positionInBlock()
+        cur = QTextCursor(block)
+        cur.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        cur.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        cur.insertText(b)
+        cur2 = QTextCursor(target)
+        cur2.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        cur2.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        cur2.insertText(a)
+        # 恢复光标位置（在移动后的块内）
+        block2 = target if delta > 0 else block
+        c = self.textCursor()
+        c.setPosition(block2.position() + min(pos, len(b if delta > 0 else a)))
+        self.setTextCursor(c)
+
+    def _delete_block(self):
+        """删除当前整段。"""
+        cursor = self.textCursor()
+        block = cursor.block()
+        c = QTextCursor(block)
+        c.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        c.removeSelectedText()
+        if c.atBlockEnd() and c.block().next().isValid():
+            c.deleteChar()   # 删掉段尾换行
+        self.setTextCursor(c)
+
+    def _split_block(self):
+        """Ctrl+Enter：光标处快速分段（插入空段）。"""
+        self.insertPlainText("\n\n")
+        c = self.textCursor()
+        c.movePosition(QTextCursor.MoveOperation.Left)
+        self.setTextCursor(c)
+
+    # ---------- E. 打字机模式 ----------
+    def _maybe_typewriter_center(self):
+        if not self.config.get("editor", {}).get("typewriter", False):
+            return
+        self._center_current_line()
+
+    def _center_current_line(self):
+        vp = self.viewport()
+        cursor_rect = self.cursorRect()
+        target = cursor_rect.center().y() - vp.height() / 2
+        self.verticalScrollBar().setValue(
+            self.verticalScrollBar().value() + int(cursor_rect.center().y()
+                                                  - vp.height() / 2))
+
+    # ---------- A. 人物名自动补全 ----------
+    def _maybe_name_complete(self):
+        if not self.config.get("editor", {}).get("name_complete", True):
+            return
+        if self.names_provider is None:
+            return
+        names = self.names_provider() or []
+        if not names:
+            self._name_popup.hide()
+            return
+        import re
+        text = self.textCursor().block().text()
+        before = text[:self.textCursor().positionInBlock()]
+        m = re.search(r"[\u4e00-\u9fff]{1,4}$", before)
+        if not m:
+            self._name_popup.hide()
+            return
+        prefix = m.group(0)
+        matches = [n for n in names if len(n) >= 2 and n.startswith(prefix)][:8]
+        if not matches:
+            self._name_popup.hide()
+            return
+        self._name_popup.show_for(prefix, matches, self.cursorRect())
+
+    def _insert_completion(self, name: str):
+        """用补全名替换光标前的名字前缀。"""
+        self._name_popup.hide()
+        if not name:
+            return
+        cursor = self.textCursor()
+        import re
+        text = cursor.block().text()
+        before = text[:cursor.positionInBlock()]
+        m = re.search(r"[\u4e00-\u9fff]{1,4}$", before)
+        if not m:
+            return
+        cursor.movePosition(QTextCursor.MoveOperation.Left,
+                            QTextCursor.MoveMode.MoveAnchor, len(m.group(0)))
+        cursor.insertText(name)
+        self.setTextCursor(cursor)
+        self.setFocus()
+
+    # ---------- B. 一键段落整理 ----------
+    def format_paragraphs(self):
+        """段首缩进 2 全角、去多余空行、全角标点、行尾去空格（可撤销）。"""
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            text = cursor.selectedText().replace("\u2029", "\n")
+            use_selection = True
+        else:
+            text = self.toPlainText()
+            use_selection = False
+        out = []
+        for para in text.split("\n"):
+            p = para.strip()
+            if not p:
+                continue
+            p = (p.replace(",", "，").replace(".", "。")
+                 .replace("?", "？").replace("!", "！").replace(";", "；")
+                 .replace(":", "："))
+            if not p.startswith(INDENT_FULLWIDTH):
+                p = INDENT_FULLWIDTH + p
+            out.append(p)
+        new_text = "\n\n".join(out)
+        if use_selection:
+            cursor.insertText(new_text)
+        else:
+            c = QTextCursor(self.document())
+            c.select(QTextCursor.SelectionType.Document)
+            c.insertText(new_text)
+        self.setTextCursor(self.textCursor())
 
     def _auto_first_line_indent(self):
         """新段落若上一段非空且本段行首无缩进，则自动插入两个全角空格。"""
@@ -636,6 +902,10 @@ class EditorWidget(QTextEdit):
 
     def set_content(self, text: str) -> None:
         """载入内容（旧纯文本自动兼容；富文本走 HTML）。"""
+        try:
+            self._name_popup.hide()
+        except Exception:  # noqa: BLE001
+            pass
         if self._looks_html(text):
             self.setHtml(text)
         else:
@@ -810,6 +1080,11 @@ class EditorWidget(QTextEdit):
         menu.addAction("📋 提炼本章要点", lambda: self.author_tool_requested.emit("refine"))
         menu.addAction("📖 前情提要…", lambda: self.author_tool_requested.emit("summary"))
         menu.addAction("🔗 检查章节衔接", lambda: self.author_tool_requested.emit("link"))
+        menu.addSeparator()
+        menu.addAction("📐 段落整理（缩进/空行/标点）", self.format_paragraphs)
+        tw = menu.addAction("⌨ 打字机模式（当前行居中）", self._toggle_typewriter)
+        tw.setCheckable(True)
+        tw.setChecked(bool(self.config.get("editor", {}).get("typewriter", False)))
         menu.addSeparator()
         menu.addAction("🔖 添加/取消书签（当前行）", self._toggle_bookmark_current)
         menu.addAction("⌨ AI 写作输入…", self.write_requested.emit)

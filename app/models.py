@@ -335,3 +335,14 @@ class ChronicleEvent:
     detail: str = ""               # 说明
     order: int = 0
     created_at: str = field(default_factory=_now)
+
+
+@dataclass
+class RecycleEntry:
+    """回收站：被删除的章节（可恢复）。"""
+    id: int = 0
+    book_id: int = 0
+    title: str = ""
+    content: str = ""
+    word_count: int = 0
+    deleted_at: str = field(default_factory=_now)

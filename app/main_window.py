@@ -423,6 +423,8 @@ class MainWindow(QMainWindow):
             recents = self.config.get("app", {}).get("recent_projects", [])
             if recents and os.path.exists(recents[0]):
                 QTimer.singleShot(0, lambda: self.open_project(recents[0]))
+        # 崩溃/异常退出后恢复上次打开的章节标签
+        QTimer.singleShot(800, self._restore_open_tabs)
 
         self.log("欢迎使用小说编辑器！通过「文件 → 新建项目」开始创作。")
 
@@ -495,6 +497,7 @@ class MainWindow(QMainWindow):
         self._add_action(project_menu, "ℹ 项目信息…", self.show_project_info_dialog, None, None)
         project_menu.addSeparator()
         self._add_action(project_menu, "🗂 章节管理…", self.show_chapter_dialog, "Ctrl+Shift+C", None)
+        self._add_action(project_menu, "🗑 回收站…", self._show_recycle_dialog, None, None)
         self._add_action(project_menu, "👥 大纲 / 世界观 / 角色管理…", lambda: self.show_character_dialog(2), "Ctrl+Shift+R", None)
         self._add_action(project_menu, "📐 创作规划（伏笔/章节卡片/体系/剧情线/时间线）", lambda: self._show_planning_dialog(True), "Ctrl+Shift+P", None)
         project_menu.addSeparator()
@@ -2189,6 +2192,45 @@ class MainWindow(QMainWindow):
         self._refresh_chapter_dock()
         self.log(f"已删除章节《{ch.title}》", "ok")
 
+    def _record_open_tabs(self):
+        """记录当前打开的章节（崩溃/异常退出后可恢复）。"""
+        if self.storage is None:
+            return
+        ids = [cid for cid in self._tab_chapters]
+        app_cfg = self.config.setdefault("app", {})
+        if ids:
+            app_cfg["open_tabs"] = {"path": self.storage.db_path, "ids": ids}
+        else:
+            app_cfg.pop("open_tabs", None)
+        save_config(self.config)
+
+    def _restore_open_tabs(self):
+        """启动后自动恢复上次打开的章节标签（异常退出找回）。"""
+        if self.storage is not None:
+            return   # 已有项目打开（手动/测试），不自动切换
+        tabs = self.config.get("app", {}).get("open_tabs")
+        if not isinstance(tabs, dict):
+            return
+        path = tabs.get("path")
+        ids = tabs.get("ids") or []
+        if not path or not os.path.exists(path) or not ids:
+            return
+        try:
+            self.open_project(path)
+        except Exception:  # noqa: BLE001
+            return
+        if self.storage is None:
+            return
+        for cid in ids[:10]:
+            try:
+                if self.storage.get_chapter(cid) is not None:
+                    self.open_chapter(cid)
+            except Exception:  # noqa: BLE001
+                continue
+        self.config.setdefault("app", {}).pop("open_tabs", None)   # 恢复后清除
+        save_config(self.config)
+        self.log("已恢复上次打开的章节标签", "info")
+
     def open_chapter(self, chapter_id: int):
         if self.storage is None:
             return
@@ -2212,6 +2254,7 @@ class MainWindow(QMainWindow):
         self._refresh_snap()
         if hasattr(self, "chapter_list_view"):
             self.chapter_list_view.set_current(chapter_id)
+        self._record_open_tabs()
 
     def _new_editor(self, chapter_id: int | None) -> EditorWidget:
         editor = EditorWidget(self.config)
@@ -2227,6 +2270,7 @@ class MainWindow(QMainWindow):
         editor.query_requested.connect(self._query_entity)
         editor.plugin_actions_provider = lambda ed=editor: self.plugin_manager.editor_actions(ed)
         editor.quick_texts_provider = lambda: self.config.get("app", {}).get("quick_texts", [])
+        editor.names_provider = self._editor_names_provider   # 人名自动补全
         editor.cursorPositionChanged.connect(self._status_timer.start)
         editor.textChanged.connect(self._on_editor_text_changed)
         editor.textChanged.connect(self._preview_timer.start)
@@ -2255,6 +2299,7 @@ class MainWindow(QMainWindow):
         if cid is not None:
             self._tab_chapters.pop(cid, None)
         widget.deleteLater()
+        self._record_open_tabs()
 
     def _rename_tab_chapter(self, index: int):
         """双击编辑器标签页 → 修改章节名称。"""
@@ -2665,6 +2710,24 @@ class MainWindow(QMainWindow):
         self.snap_panel.refresh(self.storage, cid, title)
         if hasattr(self, "snap_float") and self.snap_float.isVisible():
             self.snap_float.refresh(self.storage, cid, title)
+
+    def _editor_names_provider(self) -> list:
+        if self.storage is None:
+            return []
+        try:
+            return [c.name for c in self.storage.list_characters() if c.name]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _show_recycle_dialog(self):
+        if self.storage is None:
+            QMessageBox.information(self, "回收站", "请先新建或打开一个项目。")
+            return
+        from .dialogs.recycle_dialog import RecycleDialog
+        dlg = RecycleDialog(self.storage,
+                            on_restored=self._refresh_chapter_dock,
+                            parent=self)
+        dlg.exec()
 
     def _show_planning_dialog(self, focus_chapter: bool = True):
         """打开「📐 创作规划」弹窗（单例，复用上次尺寸/位置）。

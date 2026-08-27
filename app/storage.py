@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from datetime import datetime
 from typing import List, Optional
 
 from .models import (
     AttributeItem, Book, Bookmark, CaseCard, Chapter, ChapterCard, Character,
     CharacterArc, ChronicleEvent, Foreshadow, ModuleDef, ModuleEntry, Note,
-    NovelMap, PlotNode, PowerLevel, Relation, StorylineLine, StorylineNode,
-    TechNode, TimelineEvent, Weapon, WorldSetting, Worldview,
+    NovelMap, PlotNode, PowerLevel, RecycleEntry, Relation, StorylineLine,
+    StorylineNode, TechNode, TimelineEvent, Weapon, WorldSetting, Worldview,
 )
 
 SCHEMA = """
@@ -194,6 +195,14 @@ CREATE TABLE IF NOT EXISTS chronicle_events (
     detail TEXT DEFAULT '',
     "order" INTEGER DEFAULT 0,
     created_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS recycle (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL,
+    title TEXT DEFAULT '',
+    content TEXT DEFAULT '',
+    word_count INTEGER DEFAULT 0,
+    deleted_at TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS worldviews (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -472,12 +481,58 @@ class Storage:
         self.conn.commit()
 
     def delete_chapter(self, chapter_id: int) -> None:
-        # 级联清理：书签 / 关系 / 地图位置 / 章节-地图绑定，避免孤儿数据
+        # 软删除：先移入回收站（可恢复），再级联清理关联数据
+        row = self.conn.execute(
+            "SELECT book_id, title, content, word_count FROM chapters WHERE id=?",
+            (chapter_id,),
+        ).fetchone()
+        if row is not None:
+            self.conn.execute(
+                "INSERT INTO recycle (book_id, title, content, word_count, deleted_at)"
+                " VALUES (?,?,?,?,?)",
+                (row["book_id"], row["title"], row["content"], row["word_count"],
+                 datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
         self.conn.execute("DELETE FROM chapters WHERE id=?", (chapter_id,))
         self.conn.execute("DELETE FROM bookmarks WHERE chapter_id=?", (chapter_id,))
         self.conn.execute("DELETE FROM relations WHERE chapter_id=?", (chapter_id,))
         self.conn.execute("DELETE FROM map_positions WHERE chapter_id=?", (chapter_id,))
         self.conn.execute("DELETE FROM chapter_maps WHERE chapter_id=?", (chapter_id,))
+        self.conn.commit()
+
+    # ---------- 回收站 ----------
+    def list_recycle(self) -> List[RecycleEntry]:
+        rows = self.conn.execute(
+            "SELECT * FROM recycle ORDER BY id DESC").fetchall()
+        return [RecycleEntry(**dict(r)) for r in rows]
+
+    def restore_recycle(self, rid: int) -> bool:
+        """把回收站条目恢复为章节（新 id、order 置尾）。"""
+        row = self.conn.execute(
+            "SELECT book_id, title, content, word_count FROM recycle WHERE id=?",
+            (rid,),
+        ).fetchone()
+        if row is None:
+            return False
+        order = self.max_chapter_order() + 1
+        cur = self.conn.execute(
+            "INSERT INTO chapters (book_id, title, subtitle, volume, summary, \"order\","
+            " status, outline_stage, content, word_count, created_at, updated_at)"
+            " VALUES (?,?,'','','',?,'草稿','',?,?,?,?)",
+            (row["book_id"], row["title"], order, row["content"], row["word_count"],
+             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+             datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        self.conn.execute("DELETE FROM recycle WHERE id=?", (rid,))
+        self.conn.commit()
+        return cur.lastrowid > 0
+
+    def purge_recycle(self, rid: int) -> None:
+        self.conn.execute("DELETE FROM recycle WHERE id=?", (rid,))
+        self.conn.commit()
+
+    def purge_all_recycle(self) -> None:
+        self.conn.execute("DELETE FROM recycle")
         self.conn.commit()
 
     def max_chapter_order(self) -> int:
