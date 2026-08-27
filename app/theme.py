@@ -32,6 +32,7 @@ PRESETS: dict = {
             "PROGRESS": "#8CD0B2", "PROGRESSBG": "#E4EFE9",
             "CHECK": "#E4EFE9", "CHECKED": "#9ED8BC",
             "HEADER": "#EFF8F3", "SEPLINE": "#D9E9E0",
+            "SPLITTER": "#C6DCCF",
             "WELCOME_BTN": "#A9DCC5", "WELCOME_BTN_HOVER": "#93D2B8",
         },
         "palette": {
@@ -61,6 +62,7 @@ PRESETS: dict = {
             "PROGRESS": "#5FA88B", "PROGRESSBG": "#2E3A34",
             "CHECK": "#3A4A42", "CHECKED": "#5FA88B",
             "HEADER": "#2E3A34", "SEPLINE": "#3A4A42",
+            "SPLITTER": "#4A5E54",
             "WELCOME_BTN": "#4E9A7E", "WELCOME_BTN_HOVER": "#3F8A6F",
         },
         "palette": {
@@ -90,6 +92,7 @@ PRESETS: dict = {
             "PROGRESS": "#E88A9D", "PROGRESSBG": "#F6E3E7",
             "CHECK": "#F2D9DE", "CHECKED": "#E88A9D",
             "HEADER": "#FBEDF0", "SEPLINE": "#F3DCE1",
+            "SPLITTER": "#EAC4CE",
             "WELCOME_BTN": "#EFA3B2", "WELCOME_BTN_HOVER": "#E88A9D",
         },
         "palette": {
@@ -570,10 +573,10 @@ QProgressBar::chunk {
 
 /* ================= 分隔条 / 滚动条 ================= */
 QSplitter::handle {
-    background: {SEPLINE};
+    background: {SPLITTER};
 }
-QSplitter::handle:horizontal { width: 2px; }
-QSplitter::handle:vertical { height: 2px; }
+QSplitter::handle:horizontal { width: 4px; }
+QSplitter::handle:vertical { height: 4px; }
 
 QScrollBar:vertical {
     background: transparent;
