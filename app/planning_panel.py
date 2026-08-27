@@ -1295,6 +1295,22 @@ class PlanningDialog(GradientDialog):
         self.foreshadow_tab.set_chapter_filter(title)
         self.storyline_tab.set_chapter_filter(title)
 
+    def open_new(self, kind: str):
+        """创建菜单直达：切到对应 tab 并进入「新增」状态。
+        kind: card / foreshadow / storyline"""
+        if kind == "card":
+            self.tabs.setCurrentWidget(self.card_tab)
+            self.card_tab._new()
+        elif kind == "foreshadow":
+            self.tabs.setCurrentWidget(self.foreshadow_tab)
+            self.foreshadow_tab._new()
+        elif kind == "storyline":
+            self.tabs.setCurrentWidget(self.storyline_tab)
+            self.storyline_tab._new_line()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
     def focus_current_chapter(self, chapter_id: int = 0, chapter_title: str = ""):
         """定位到某章节：过滤下拉选中它，并跳到章节卡片 tab。"""
         if chapter_id:

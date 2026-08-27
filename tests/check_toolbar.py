@@ -83,5 +83,12 @@ set_act.trigger()
 assert len(calls) == 1
 print("4) 设置按钮 OK")
 
+# ---------- 创建菜单新增项 ----------
+menus = {m[0]: m[1] for m in win._menus}
+create_actions = [a.text() for a in menus["创建"].actions() if a.text()]
+for t in ("伏笔", "章节卡片", "剧情线", "AI 生成章节", "地图", "自定义模块", "大纲节点"):
+    assert any(t in x for x in create_actions), f"创建菜单应有 {t}"
+print("5) 创建菜单新增项 OK")
+
 win.close()
 print("QUICK TOOLBAR ALL OK")

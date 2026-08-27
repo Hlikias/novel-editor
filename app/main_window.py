@@ -470,6 +470,15 @@ class MainWindow(QMainWindow):
         create_menu.addSeparator()
         self._add_action(create_menu, "📝 新建便签…", self._create_note_action, None, None)
         self._add_action(create_menu, "✨ 记录灵感…", self.show_quick_note_dialog, "Ctrl+Shift+I", None)
+        create_menu.addSeparator()
+        self._add_action(create_menu, "🪝 新建伏笔", lambda: self._planning_new("foreshadow"), None, None)
+        self._add_action(create_menu, "📇 新建章节卡片", lambda: self._planning_new("card"), None, None)
+        self._add_action(create_menu, "📈 新建剧情线", lambda: self._planning_new("storyline"), None, None)
+        self._add_action(create_menu, "✍️ AI 生成章节…", self._show_chapter_gen_dialog, None, None)
+        create_menu.addSeparator()
+        self._add_action(create_menu, "🗺 新建地图", lambda: self._show_character_tab("map"), None, None)
+        self._add_action(create_menu, "🧩 新建自定义模块", lambda: self._show_character_tab("modules"), None, None)
+        self._add_action(create_menu, "📑 新建大纲节点", lambda: self._show_character_tab("outline"), None, None)
         self._menus.append(("创建", create_menu))
 
         # ---- 编辑 ----
@@ -2769,6 +2778,30 @@ class MainWindow(QMainWindow):
         self._planning_dialog.show()
         self._planning_dialog.raise_()
         self._planning_dialog.activateWindow()
+
+    def _planning_new(self, kind: str):
+        """创建菜单直达创作规划并进入新建态。"""
+        if self.storage is None:
+            QMessageBox.information(self, "提示", "请先新建或打开一个项目。")
+            return
+        if not hasattr(self, "_planning_dialog") or self._planning_dialog is None:
+            from .planning_panel import PlanningDialog
+            self._planning_dialog = PlanningDialog(self, storage=self.storage)
+        else:
+            self._planning_dialog.set_storage(self.storage)
+            self._planning_dialog.reload()
+        self._planning_dialog.open_new(kind)
+
+    def _show_character_tab(self, key: str):
+        """创建菜单直达项目设定管理的某页（按 key）。"""
+        if self.storage is None:
+            QMessageBox.information(self, "提示", "请先新建或打开一个项目。")
+            return
+        dlg = CharacterDialog(self.storage, self)
+        dlg.select_tab(key)
+        if key == "outline":
+            dlg.outline_tab._add_node()
+        dlg.exec()
 
     def show_project_info_dialog(self):
         if self.storage is None:

@@ -3931,7 +3931,9 @@ class CharacterDialog(GradientDialog):
             widgets.append((f"module:{md.id}", tab, f"📦 {md.name}"))
 
         self._module_tabs_by_widget = {}
+        self._tab_keys: list[str] = []
         for key, w, label in widgets:
+            self._tab_keys.append(key)
             idx = self.tabs.addTab(wrap_in_scroll(w), label)
             if key in self.MANDATORY:
                 self.tabs.tabBar().setTabButton(
@@ -3950,6 +3952,14 @@ class CharacterDialog(GradientDialog):
         self.char_tab.reload()
         # stashed 中固定 tab 的内容 widget 已重新 addTab（仍持有 self 引用）；
         # 被关闭的旧 GenericModuleTab 无引用，随 stashed 释放被销毁，属预期。
+
+    def select_tab(self, key: str) -> bool:
+        """按 TAB_DEFS 的 key 切换到对应标签页（index 会随隐藏模块偏移，用 key 更稳）。"""
+        keys = [k for k, _w, _l in self._tab_items()]
+        if key in keys:
+            self.tabs.setCurrentIndex(keys.index(key))
+            return True
+        return False
 
     def _sync_tabs(self):
         w = self.tabs.currentWidget()
