@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """综合验证：书签重命名 / 地图背景 / 左上角按钮删除 / 世界观动态字段。"""
 import os
 import sys
@@ -10,6 +10,8 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
+import app.main_window as _mw
+_mw.save_config = lambda cfg: None   # 测试不写真实配置
 from app.main_window import MainWindow
 from app.models import Book, Chapter, Character, Bookmark, NovelMap
 from app.storage import Storage

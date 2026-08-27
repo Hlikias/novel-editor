@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """验证编辑器底部信息条：本章/段落行数/全书/今日目标/位置/保存态。"""
 import os
 import sys
@@ -9,6 +9,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtWidgets import QApplication
 
+import app.main_window as _mw
+_mw.save_config = lambda cfg: None   # 测试不写真实配置
 from app.main_window import MainWindow
 from app.models import Book, Chapter
 from app.storage import Storage

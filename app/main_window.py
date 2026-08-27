@@ -63,23 +63,26 @@ ENCODINGS = ["UTF-8", "GBK"]
 # 底部控制台（轻量 REPL）
 # ======================================================================
 class ConsoleWidget(QPlainTextEdit):
-    """简单的 Python 控制台：可访问 storage、book 等对象。"""
+    """底部控制台：支持常用命令（ls/open/save/stats/theme…）与 Python 表达式。"""
 
-    def __init__(self, namespace: dict, parent=None):
+    def __init__(self, namespace: dict, main_window=None, parent=None):
         super().__init__(parent)
         self.namespace = namespace
+        self.main_window = main_window
         self.history: list[str] = []
         self._hist_index = -1
         self._pending = ""
         self.setMaximumBlockCount(2000)
-        self.setPlaceholderText("控制台：输入 Python 表达式，回车执行。输入 help 查看可用命令。")
+        self.setPlaceholderText("控制台：输入命令或 Python 表达式，回车执行。输入 help 查看命令。")
         self._print_banner()
 
     def _print_banner(self):
         self.setPlainText(
             "小说编辑器控制台\n"
-            "可用对象：storage(当前项目), book(当前书籍), count_words(字数统计)\n"
-            "输入 help 查看帮助，clear 清屏。\n\n"
+            "常用命令：ls / open <编号> / new <标题> / save / stats / goto <行> /\n"
+            "         theme <light|dark|pink> / words / find <关键词>\n"
+            "可用对象：storage(当前项目), book(当前书籍), count_words(文本)\n"
+            "输入 help 查看全部命令。\n\n"
         )
         self.append_prompt()
 
@@ -143,16 +146,7 @@ class ConsoleWidget(QPlainTextEdit):
             return
         self.history.append(cmd)
         self._hist_index = -1
-        if cmd == "help":
-            self.insertPlainText(
-                "可用命令：help / clear\n"
-                "可用对象：storage(项目数据), book(当前书籍), count_words(文本)\n"
-                "示例：storage.list_chapters()\n\n"
-            )
-            self.append_prompt()
-            return
-        if cmd == "clear":
-            self.clear()
+        if self._exec_command(cmd):
             self.append_prompt()
             return
         try:
@@ -167,6 +161,132 @@ class ConsoleWidget(QPlainTextEdit):
         except Exception as e:  # noqa: BLE001
             self.insertPlainText(f"错误: {e}\n")
         self.append_prompt()
+
+    # ---------- 常用命令 ----------
+    def _out(self, text: str):
+        self.insertPlainText(str(text) + "\n")
+
+    def _exec_command(self, cmd: str) -> bool:
+        """处理内置命令；返回 True 表示已处理（不再按 Python 执行）。"""
+        parts = cmd.split(maxsplit=1)
+        name = parts[0].lower()
+        arg = parts[1].strip() if len(parts) > 1 else ""
+        win = self.main_window
+        st = self.namespace.get("storage")
+
+        if cmd == "help":
+            self._out(
+                "可用命令：\n"
+                "  ls              列出章节（编号 标题 字数）\n"
+                "  open <编号>      在编辑器打开章节\n"
+                "  new <标题>       新建章节\n"
+                "  save            保存当前章节\n"
+                "  stats           项目统计（章节数/总字数/今日字数）\n"
+                "  words [编号]     某章节字数（默认当前章）\n"
+                "  goto <行号>      跳到当前章节指定行\n"
+                "  find <关键词>    全文查找\n"
+                "  theme <主题>     切换主题 light / dark / pink\n"
+                "  clear           清屏\n"
+                "也可直接输入 Python：storage.list_chapters() 等"
+            )
+            return True
+        if cmd == "clear":
+            self.clear()
+            return True
+
+        if st is None:
+            self._out("（请先打开一个项目）")
+            return True
+
+        if name == "ls":
+            for i, ch in enumerate(st.list_chapters(), 1):
+                self._out(f"{i:>3}  {ch.title}  {ch.word_count} 字")
+            return True
+        if name == "open":
+            try:
+                idx = int(arg) - 1
+                ch = st.list_chapters()[idx]
+            except (ValueError, IndexError):
+                self._out(f"用法：open <编号>（1-{len(st.list_chapters())}）")
+                return True
+            if win is not None:
+                win.open_chapter(ch.id)
+                self._out(f"已打开《{ch.title}》")
+            return True
+        if name == "new":
+            from .models import Chapter
+            ch = Chapter(book_id=st.get_book().id,
+                         title=arg or f"第 {st.max_chapter_order() + 1} 章",
+                         order=st.max_chapter_order() + 1, status="草稿")
+            ch.id = st.add_chapter(ch)
+            if win is not None:
+                win._refresh_chapter_dock()
+            self._out(f"已新建章节《{ch.title}》")
+            return True
+        if name == "save":
+            if win is not None:
+                win.save_current_chapter()
+                self._out("已保存当前章节")
+            return True
+        if name == "stats":
+            chapters = st.list_chapters()
+            total = sum(c.word_count for c in chapters)
+            book = st.get_book()
+            self._out(f"书名：{book.title}（{book.genre}）")
+            self._out(f"章节：{len(chapters)} 篇，总字数 {total}，")
+            if win is not None and hasattr(win, "time_tracker"):
+                stats = win.time_tracker.stats()
+                self._out(f"今日写作：{stats.get('today', 0)} 字")
+            return True
+        if name == "words":
+            ch = None
+            if arg:
+                try:
+                    ch = st.list_chapters()[int(arg) - 1]
+                except (ValueError, IndexError):
+                    pass
+            elif win is not None:
+                ed = win.current_editor()
+                cid = getattr(ed, "chapter_id", None) if ed else None
+                if cid:
+                    ch = st.get_chapter(cid)
+            if ch:
+                self._out(f"《{ch.title}》：{ch.word_count} 字")
+            else:
+                self._out("用法：words [编号]（默认当前章节）")
+            return True
+        if name == "goto":
+            try:
+                line = int(arg)
+            except ValueError:
+                self._out("用法：goto <行号>")
+                return True
+            if win is not None and win.current_editor() is not None:
+                win.current_editor().goto_line(line)
+                self._out(f"已跳到第 {line} 行")
+            else:
+                self._out("（当前没有打开的章节）")
+            return True
+        if name == "find":
+            if not arg:
+                self._out("用法：find <关键词>")
+                return True
+            if win is not None:
+                win.search_view.input.setText(arg)
+                win.search_view.do_search()
+                win.log_dock.show()
+                self._out(f"已在底部「全文搜索」中查找「{arg}」")
+            return True
+        if name == "theme":
+            from .theme import THEME_NAMES
+            if arg not in THEME_NAMES:
+                self._out(f"用法：theme <{' / '.join(THEME_NAMES)}>")
+                return True
+            if win is not None:
+                win._switch_theme(arg)
+                self._out(f"已切换主题：{arg}")
+            return True
+        return False
 
 
 # ======================================================================
@@ -271,6 +391,8 @@ class MainWindow(QMainWindow):
         self._build_central()
         # 写作时间统计：打开项目且窗口聚焦时每秒计 1 秒
         self.time_tracker = WritingTimeTracker()
+        from .word_trend import DailyWordCountTracker
+        self.word_tracker = DailyWordCountTracker()
         self._second_timer = QTimer(self)
         self._second_timer.setInterval(1000)
         self._second_timer.timeout.connect(self._on_second)
@@ -374,12 +496,14 @@ class MainWindow(QMainWindow):
         project_menu.addSeparator()
         self._add_action(project_menu, "🗂 章节管理…", self.show_chapter_dialog, "Ctrl+Shift+C", None)
         self._add_action(project_menu, "👥 大纲 / 世界观 / 角色管理…", lambda: self.show_character_dialog(2), "Ctrl+Shift+R", None)
+        self._add_action(project_menu, "📐 创作规划（伏笔/章节卡片/力量体系/弧光/时间线）", self._show_planning_dialog, None, None)
         project_menu.addSeparator()
         self._add_action(project_menu, "📊 统计视图", self.show_stats_view, None, None)
         self._add_action(project_menu, "🕵️ 错别字/违禁词检查", lambda: self._activate_bottom_tab(self.check_view), None, None)
         self._add_action(project_menu, "🔍 全文查找…", self.show_fulltext_search, None, None)
         project_menu.addSeparator()
         self._add_action(project_menu, "🗂 备份项目…", self.backup_project, None, None)
+        self._add_action(project_menu, "♻️ 从备份恢复…", self.restore_backup, None, None)
         self._add_action(project_menu, "📂 打开项目所在文件夹", self.open_project_folder, None, None)
         self._add_action(project_menu, "🗑 删除项目…", self.delete_project, None, None)
         self._menus.append(("项目", project_menu))
@@ -546,6 +670,7 @@ class MainWindow(QMainWindow):
         self.tabs.setDocumentMode(True)
         self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.currentChanged.connect(lambda _i: (self._update_status(), self._update_preview()))
+        self.tabs.tabBarDoubleClicked.connect(self._rename_tab_chapter)   # 双击 tab 重命名章节
 
         # 编辑器页 = 顶部格式工具栏 + 标签页
         self.editor_page = QWidget()
@@ -831,6 +956,231 @@ class MainWindow(QMainWindow):
         editor.setTextCursor(cursor)
         editor.setFocus()
 
+    # ---------- AI 生成章节 ----------
+    def _show_chapter_gen_dialog(self):
+        if not hasattr(self, "_chapter_gen_dialog") or self._chapter_gen_dialog is None:
+            from .dialogs.chapter_gen_dialog import ChapterGenDialog
+            self._chapter_gen_dialog = ChapterGenDialog(
+                self,
+                on_generate=self._gen_chapter_call,
+                on_ideas=self._gen_chapter_ideas_call,
+                on_save=self._save_gen_chapter_call,
+            )
+        dlg = self._chapter_gen_dialog
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        dlg.summary_edit.setFocus()
+
+    def _prev_chapter_tail(self, max_chars: int = 1200) -> str:
+        """当前章节的上一章结尾片段（用于承接剧情）。当前是第一章节时返回空串。"""
+        if self.storage is None:
+            return ""
+        editor = self.current_editor()
+        cid = getattr(editor, "chapter_id", None) if editor is not None else None
+        chs = sorted(self.storage.list_chapters(), key=lambda c: (c.order, c.id))
+        if not chs:
+            return ""
+        idx = -1
+        for i, ch in enumerate(chs):
+            if cid is not None and ch.id == cid:
+                idx = i
+                break
+        prev = None
+        if idx > 0:
+            prev = chs[idx - 1]
+        elif idx < 0 and chs:
+            prev = chs[-1]   # 当前未保存章节：参考全书最后一章
+        if prev is None:
+            return ""
+        body = prev.content or ""
+        if "<" in body:   # 富文本 HTML → 纯文本
+            try:
+                from PySide6.QtGui import QTextDocument
+                doc = QTextDocument()
+                doc.setHtml(body)
+                body = doc.toPlainText()
+            except Exception:  # noqa: BLE001
+                pass
+        tail = body.strip()[-max_chars:]
+        return f"《{prev.title}》（上一章结尾）：\n{tail}"
+
+    @staticmethod
+    def _gen_chapter_prompt(req: dict, prev_tail: str, book_title: str,
+                            context: str = "") -> str:
+        parts = [f"你是一位资深中文网络小说作家。请为小说《{book_title}》创作一章完整的章节正文。"]
+        if context:
+            parts.append("【全书设定（参考）】角色/世界观/大纲如下，人物名与设定须与之一致：\n" + context)
+        if prev_tail:
+            parts.append("【上一章回顾】须承接以下内容与文风，保持视角与人物称谓一致：\n" + prev_tail)
+        if req.get("summary"):
+            parts.append("【本章简述】\n" + req["summary"])
+        parts.append(f"【目标字数】约 {int(req.get('words', 2000))} 字")
+        if req.get("extra"):
+            parts.append("【附加要求】\n" + req["extra"])
+        parts.append(
+            "【输出要求】\n"
+            "1. 只输出章节正文，不要标题、不要“第X章”字样、不要任何解释性文字；\n"
+            "2. 人物姓名必须与【全书设定】中的角色名完全一致，不要改名、不要加字少字；\n"
+            "3. 自然分段，节奏符合网络小说阅读习惯；\n"
+            "4. 结尾留一个推进感或悬念钩子，便于继续写下一章。"
+        )
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _gen_ideas_prompt(req: dict, prev_tail: str, book_title: str,
+                          context: str = "") -> str:
+        parts = [f"你是一位资深中文网络小说作家，正在为《{book_title}》规划下一章。"]
+        if context:
+            parts.append("【全书设定（参考）】人物名与设定须与之一致：\n" + context)
+        if prev_tail:
+            parts.append("【上一章结尾】\n" + prev_tail)
+        if req.get("summary"):
+            parts.append("【本章简述】\n" + req["summary"])
+        if req.get("extra"):
+            parts.append("【附加要求】\n" + req["extra"])
+        parts.append(
+            "请推荐 2~3 个本章剧情走向思路：每个思路先用一句话概括，再用 2~3 句说明"
+            "如何展开、与上一章结尾如何衔接、能埋下什么伏笔。只输出思路，不要输出章节正文。"
+        )
+        return "\n\n".join(parts)
+
+    def _book_title(self) -> str:
+        try:
+            if self.storage is not None:
+                return self.storage.get_book().title
+        except Exception:  # noqa: BLE001
+            pass
+        return "本小说"
+
+    def _book_context(self, max_chars: int = 1500) -> str:
+        """全书设定摘要（角色卡 + 世界观 + 大纲节点），供 AI 生成参考。"""
+        if self.storage is None:
+            return ""
+        parts: list[str] = []
+        try:
+            chars = self.storage.list_characters()
+            if chars:
+                lines = ["【角色】"]
+                for ch in chars[:10]:
+                    desc = []
+                    if ch.role:
+                        desc.append(ch.role)
+                    if ch.faction:
+                        desc.append(f"阵营:{ch.faction}")
+                    if getattr(ch, "personality", ""):
+                        desc.append(f"性格:{ch.personality.strip()[:20]}")
+                    lines.append(f"　{ch.name}（{'，'.join(desc)}）")
+                parts.append("\n".join(lines))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            wv = self.storage.get_single_worldview()
+            if wv is not None:
+                wdesc = (wv.description or "").strip()[:200]
+                parts.append(
+                    f"【世界观】{wv.name}（{wv.genre}）"
+                    + (f"｜{wdesc}" if wdesc else "")
+                    + (f"｜地点:{wv.places}" if getattr(wv, "places", "") else "")
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            nodes = self.storage.list_plot_nodes()
+            if nodes:
+                names = "、".join(n.name for n in nodes[:12])
+                cur = nodes[-1]
+                parts.append(
+                    f"【大纲】节点序列：{names}；当前节点：{cur.name}"
+                    f"（冲突:{cur.conflict.strip()[:60]}；伏笔:{cur.foreshadow.strip()[:60]}）"
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        ctx = "\n".join(parts)
+        return ctx[:max_chars]
+
+    def _char_names(self) -> list[str]:
+        if self.storage is None:
+            return []
+        try:
+            return [c.name for c in self.storage.list_characters() if c.name]
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _gen_chapter_call(self, req: dict, done_cb):
+        prev_tail = self._prev_chapter_tail() if req.get("use_prev") else ""
+        context = self._book_context()
+        prompt = self._gen_chapter_prompt(req, prev_tail, self._book_title(), context)
+        self.log(f"AI 生成章节中…（约 {req.get('words')} 字，已带入全书设定，请稍候）", "info")
+
+        def wrapped(text, err):
+            if not err and text:
+                from .ai_check import check_name_consistency
+                names = self._char_names()
+                hints = check_name_consistency(text, names)
+                if hints:
+                    tip = ("\n\n———— 人物名一致性提示（AI 生成后自动检查，可删）————\n"
+                           + "\n".join(hints))
+                    text = text + tip
+                    self.log(f"AI 生成完成，发现 {len(hints)} 处人物名疑似不一致", "warn")
+            done_cb(text, err)
+
+        self.ai_panel.run_task(prompt, wrapped, stream=False)
+
+    def _gen_chapter_ideas_call(self, req: dict, done_cb):
+        prev_tail = self._prev_chapter_tail() if req.get("use_prev") else ""
+        prompt = self._gen_ideas_prompt(req, prev_tail, self._book_title(),
+                                        self._book_context())
+        self.log("AI 推荐章节思路中…", "info")
+        self.ai_panel.run_task(prompt, done_cb, stream=False)
+
+    def _save_gen_chapter_call(self, text: str, mode: str, done_cb):
+        """保存 AI 生成结果：replace=替换当前章 / append=追加到末尾 / new=另存新章节。"""
+        try:
+            if mode == "new":
+                self._save_gen_as_new(text)
+            else:
+                editor = self.current_editor()
+                if editor is None:
+                    done_cb("没有打开的章节")
+                    return
+                if mode == "replace":
+                    if QMessageBox.question(
+                        self, "替换章节", "确定用生成内容替换当前章节的全部正文？"
+                    ) != QMessageBox.StandardButton.Yes:
+                        done_cb("已取消")
+                        return
+                    editor.set_content(text)
+                else:   # append
+                    cursor = editor.textCursor()
+                    cursor.movePosition(cursor.MoveOperation.End)
+                    cursor.insertText("\n\n" + text + "\n")
+                    editor.setTextCursor(cursor)
+                if getattr(editor, "chapter_id", None) is not None:
+                    self._save_editor(editor)
+            done_cb(None)
+        except Exception as e:  # noqa: BLE001
+            self.log(f"保存 AI 生成章节失败: {e}", "error")
+            done_cb(str(e))
+
+    def _save_gen_as_new(self, text: str):
+        """把生成内容另存为新章节并打开。"""
+        if self.storage is None:
+            raise RuntimeError("请先新建或打开一个项目")
+        ch = Chapter(
+            book_id=self.storage.get_book().id,
+            title=f"第 {self.storage.max_chapter_order() + 1} 章",
+            order=self.storage.max_chapter_order() + 1,
+            status="草稿",
+        )
+        ch.id = self.storage.add_chapter(ch)
+        self.open_chapter(ch.id)
+        editor = self.current_editor()
+        if editor is not None:
+            editor.set_content(text)
+            self._save_editor(editor)
+        self.log("AI 生成章节已另存为新章节", "ok")
+
     def _open_bookmark(self, chapter_id: int, line: int):
         self.open_chapter(chapter_id)
         editor = self._tab_chapters.get(chapter_id)
@@ -909,7 +1259,10 @@ class MainWindow(QMainWindow):
         self.log_view.setObjectName("logView")
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(2000)
-        self.console = ConsoleWidget(namespace={"storage": None, "book": None, "count_words": count_words})
+        self.console = ConsoleWidget(
+            namespace={"storage": None, "book": None, "count_words": count_words},
+            main_window=self,
+        )
         self.console.setObjectName("consoleWidget")
         self.bottom_tabs.addTab(self.log_view, "📋 日志")
         self.bottom_tabs.addTab(self.console, "💻 控制台")
@@ -942,6 +1295,10 @@ class MainWindow(QMainWindow):
 
         # 底部：写作时间统计
         self.time_view = WritingTimeView()
+        from .word_trend import WordTrendView
+        self.word_trend_view = WordTrendView(self.word_tracker)
+        self.time_view.layout().insertWidget(0, self.word_trend_view)
+        self.word_trend_view.refresh()
         self.time_view.refresh(self.time_tracker.stats(), WritingTimeTracker.fmt)
         self.bottom_tabs.addTab(self.time_view, "⏱ 写作时间")
 
@@ -1117,22 +1474,36 @@ class MainWindow(QMainWindow):
         save_config(self.config)
 
     def _toggle_focus_mode(self, checked: bool):
-        """专注模式：隐藏/恢复所有 dock 与状态栏，只留编辑器。"""
+        """全屏专注模式：隐藏所有 dock、格式工具栏与状态栏，窗口全屏，只留编辑器。"""
         docks = [self.chapter_dock, self.outline_dock, self.overview_dock,
                  self.preview_dock, self.ai_dock, self.stats_dock,
                  self.notes_dock, self.log_dock, self.quote_dock,
                  self.search_dock]
         if checked:
+            if getattr(self, "simple_mode_action", None) is not None and self.simple_mode_action.isChecked():
+                self.simple_mode_action.setChecked(False)   # 两种模式互斥
             self._focus_visibility = {d: d.isVisible() for d in docks}
+            self._focus_was_maximized = self.isMaximized()
+            self._focus_format_visible = bool(
+                hasattr(self, "format_bar") and self.format_bar.isVisible())
             for d in docks:
                 d.hide()
+            if hasattr(self, "format_bar"):
+                self.format_bar.hide()
             self.statusBar().hide()
-            self.log("已进入专注模式", "info")
+            self.showFullScreen()
+            self.log("已进入全屏专注模式（再点一次「专注模式」或按 Esc 退出）", "info")
         else:
             for d, visible in getattr(self, "_focus_visibility", {}).items():
                 if visible:
                     d.show()
+            if getattr(self, "_focus_format_visible", True) and hasattr(self, "format_bar"):
+                self.format_bar.show()
             self.statusBar().show()
+            if getattr(self, "_focus_was_maximized", False):
+                self.showMaximized()
+            else:
+                self.showNormal()
             self.log("已退出专注模式", "info")
 
     # ---------- 简洁模式 ----------
@@ -1189,6 +1560,9 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             pass
         self.storage.close()
+        # 清空打开的标签：_set_project 内部还会 save_all_open_chapters，
+        # 此时旧连接已关闭，若标签还挂着会触发 "closed database" 崩溃
+        self.close_all_tabs()
         try:
             gm = GitManager(repo_dir)
             gm.restore(commit)
@@ -1264,6 +1638,7 @@ class MainWindow(QMainWindow):
         self.config = add_recent_project(self.config, storage.db_path)
         save_config(self.config)
         self._refresh_recent_menu()
+        self._auto_backup()   # 每日一次自动滚动备份
         self.log(f"已创建项目《{book.title}》（{book.genre}），存储于 {storage.db_path}", "ok")
         # 创建项目后自动新建第一章
         self.new_chapter()
@@ -1287,6 +1662,7 @@ class MainWindow(QMainWindow):
         save_config(self.config)
         self._refresh_recent_menu()
         book = storage.ensure_book()
+        self._auto_backup()   # 每日一次自动滚动备份
         self.log(f"已打开项目《{book.title}》", "ok")
 
     def _set_project(self, storage: Storage):
@@ -1304,8 +1680,8 @@ class MainWindow(QMainWindow):
         self.book_label.setText(f"📚 {book.title}")
         self.console.namespace["storage"] = storage
         self.console.namespace["book"] = book
-        self._refresh_chapter_dock()
-        # 新视图绑定项目数据
+        # 先绑定各视图到新存储，再刷新（避免视图仍持有旧连接——git 回溯时
+        # 旧连接已关闭，先刷新会触发 "closed database" 崩溃）
         self.stats_view.set_storage(storage)
         self.search_view.set_storage(storage)
         self.notes_view.set_storage(storage)
@@ -1314,6 +1690,7 @@ class MainWindow(QMainWindow):
         self.check_view.set_storage(storage)
         self.outline_view.set_storage(storage)
         self.overview_view.set_storage(storage)
+        self._refresh_chapter_dock()
         # 切换到写作编辑界面（欢迎页消失）
         self.central_stack.setCurrentIndex(1)
         self.welcome_page.set_save_enabled(True)
@@ -1571,6 +1948,8 @@ class MainWindow(QMainWindow):
         editor.ai_action_requested.connect(self._ai_edit_task)
         editor.write_requested.connect(self.show_ai_input_dialog)
         editor.voice_input_requested.connect(self.show_voice_input_dialog)
+        editor.new_chapter_requested.connect(self.new_chapter)
+        editor.chapter_gen_requested.connect(self._show_chapter_gen_dialog)
         editor.query_requested.connect(self._query_entity)
         editor.plugin_actions_provider = lambda ed=editor: self.plugin_manager.editor_actions(ed)
         editor.quick_texts_provider = lambda: self.config.get("app", {}).get("quick_texts", [])
@@ -1603,6 +1982,29 @@ class MainWindow(QMainWindow):
             self._tab_chapters.pop(cid, None)
         widget.deleteLater()
 
+    def _rename_tab_chapter(self, index: int):
+        """双击编辑器标签页 → 修改章节名称。"""
+        if self.storage is None:
+            return
+        editor = self.tabs.widget(index)
+        cid = getattr(editor, "chapter_id", None)
+        if cid is None:
+            return
+        ch = self.storage.get_chapter(cid)
+        if ch is None:
+            return
+        from PySide6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "重命名章节", "章节名称：", text=ch.title)
+        if not ok or not name.strip():
+            return
+        ch.title = name.strip()
+        ch.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.storage.update_chapter(ch)
+        self.tabs.setTabText(index, ch.title)
+        self._refresh_chapter_dock()
+        self._update_status()
+        self.log(f"章节已重命名：《{ch.title}》", "ok")
+
     def close_all_tabs(self):
         while self.tabs.count():
             self._close_tab(0)
@@ -1627,10 +2029,15 @@ class MainWindow(QMainWindow):
                 self._close_tab(idx)
             self._refresh_chapter_dock()
             return
+        old_wc = int(ch.word_count or 0)
         ch.content = editor.save_content()   # 富文本 HTML（含格式）
-        ch.word_count = count_words(editor.content())["total"]
+        new_wc = count_words(editor.content())["total"]
+        ch.word_count = new_wc
         ch.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.storage.update_chapter(ch)
+        # 记录今日净新增字数（趋势图）
+        if hasattr(self, "word_tracker"):
+            self.word_tracker.record(new_wc - old_wc)
         editor.document().setModified(False)
         idx = self.tabs.indexOf(editor)
         if idx >= 0:
@@ -1638,6 +2045,8 @@ class MainWindow(QMainWindow):
         self._refresh_chapter_dock()
         self.goal_view.refresh()   # 今日字数可能变化
         self._update_status()
+        if hasattr(self, "word_trend_view"):
+            self.word_trend_view.refresh()
 
     def save_all_open_chapters(self):
         if self.storage is None:
@@ -1818,6 +2227,72 @@ class MainWindow(QMainWindow):
             return
         self.log(f"项目已备份到 {dest}", "ok")
 
+    def _auto_backup(self) -> str | None:
+        """打开/新建项目时自动滚动备份（每天一次，保留最近 10 份）。"""
+        if self.storage is None:
+            return None
+        from .backup import backup_project, backup_today_exists
+        db = self.storage.db_path
+        title = ""
+        try:
+            title = self.storage.get_book().title
+        except Exception:  # noqa: BLE001
+            pass
+        if backup_today_exists(db, title):
+            return None
+        path = backup_project(db, title)
+        if path:
+            self.log(f"已自动备份项目（{os.path.basename(path)}）", "ok")
+        return path
+
+    def restore_backup(self):
+        """从自动备份恢复：选备份 → 覆盖当前 .db → 重新打开项目。"""
+        if self.storage is None:
+            QMessageBox.information(self, "提示", "请先新建或打开一个项目。")
+            return
+        from .backup import list_backups, restore_backup
+        title = ""
+        try:
+            title = self.storage.get_book().title
+        except Exception:  # noqa: BLE001
+            pass
+        backups = list_backups(self.storage.db_path, title)
+        if not backups:
+            QMessageBox.information(
+                self, "从备份恢复",
+                "还没有自动备份。\n打开项目时每天会自动备份一次，也可在「项目」菜单手动备份。",
+            )
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择要恢复的备份", os.path.dirname(backups[-1]) or "",
+            "备份文件 (*.db)",
+        )
+        if not path:
+            return
+        if QMessageBox.question(
+            self, "恢复备份",
+            f"确定用该备份覆盖当前项目？\n{path}\n\n当前未保存的改动会丢失！",
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        db_path = self.storage.db_path
+        try:
+            self.save_all_open_chapters()
+        except Exception:  # noqa: BLE001
+            pass
+        self.storage.close()
+        self.close_all_tabs()
+        self.storage = None
+        if restore_backup(db_path, path):
+            try:
+                new_st = Storage(db_path)
+            except Exception as e:  # noqa: BLE001
+                QMessageBox.critical(self, "恢复失败", f"备份数据库无法打开：\n{e}")
+                return
+            self._set_project(new_st)
+            self.log(f"已从备份恢复：{os.path.basename(path)}", "ok")
+        else:
+            QMessageBox.critical(self, "恢复失败", "备份文件复制失败。")
+
     def open_project_folder(self):
         if self.storage is None:
             return
@@ -1865,7 +2340,31 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "请先新建或打开一个项目。")
             return
         dlg = CharacterDialog(self.storage, self, initial_tab=initial_tab)
+        # 大纲节点 → 章节草稿：注入 AI 调用，保存后刷新章节树
+        ot = getattr(dlg, "outline_tab", None)
+        if ot is not None:
+            ot.ai_provider = self._ai_draft_prompt
+            ot.draft_saved.connect(self._refresh_chapter_dock)
         dlg.exec()
+
+    def _ai_draft_prompt(self, prompt: str, done_cb):
+        """大纲草稿的 AI 生成入口。"""
+        self.ai_panel.run_task(prompt, done_cb, stream=False)
+
+    def _show_planning_dialog(self):
+        """打开「📐 创作规划」弹窗（单例，复用上次尺寸/位置）。"""
+        if self.storage is None:
+            QMessageBox.information(self, "创作规划", "请先新建或打开一个项目。")
+            return
+        if not hasattr(self, "_planning_dialog") or self._planning_dialog is None:
+            from .planning_panel import PlanningDialog
+            self._planning_dialog = PlanningDialog(self, storage=self.storage)
+        else:
+            self._planning_dialog.set_storage(self.storage)
+            self._planning_dialog.reload()
+        self._planning_dialog.show()
+        self._planning_dialog.raise_()
+        self._planning_dialog.activateWindow()
 
     def show_project_info_dialog(self):
         if self.storage is None:
@@ -2020,6 +2519,10 @@ class MainWindow(QMainWindow):
     def _apply_theme(self, name: str | None = None, overrides: dict | None = None):
         name = name or self.config.get("app", {}).get("theme", "light")
         overrides = overrides or self.config.get("app", {}).get("custom_colors", {})
+        key = (name, tuple(sorted((overrides or {}).items())))
+        if key == getattr(self, "_applied_theme_key", None):
+            return   # 主题/颜色未变：跳过全局 QSS 重建（设置保存卡顿的主因）
+        self._applied_theme_key = key
         theme.set_active(name, overrides)
         QApplication.instance().setStyleSheet(theme.build_stylesheet(name, overrides))
         for editor in self._tab_chapters.values():
@@ -2180,7 +2683,10 @@ class MainWindow(QMainWindow):
     # ================= 状态栏 =================
     def _update_status(self):
         if self.storage is not None:
-            book = self.storage.get_book()
+            try:
+                book = self.storage.get_book()
+            except Exception:  # noqa: BLE001   # 项目切换/git 回溯期间连接可能刚关闭
+                book = None
             self.book_label.setText(f"📚 {book.title}" if book else "未打开项目")
         else:
             self.book_label.setText("未打开项目")
@@ -2265,11 +2771,29 @@ class MainWindow(QMainWindow):
                 self.restoreGeometry(geo.encode("latin1"))
             except Exception:  # noqa: BLE001
                 pass
+        # 换显示器 / 分辨率变小时钳制：窗口不超出可用屏幕（2K → 1K 等场景）
+        self._clamp_window_to_screen()
         if state:
             try:
                 self.restoreState(state.encode("latin1"))
             except Exception:  # noqa: BLE001
                 pass
+
+    def _clamp_window_to_screen(self):
+        """把窗口尺寸/位置限制在当前可用屏幕内，避免换屏后窗口超出屏幕。"""
+        try:
+            scr = QApplication.primaryScreen()
+            if scr is None:
+                return
+            avail = scr.availableGeometry()
+            fg = self.frameGeometry()
+            w = min(fg.width(), avail.width())
+            h = min(fg.height(), avail.height())
+            x = min(max(fg.x(), avail.left()), avail.right() - max(120, w))
+            y = min(max(fg.y(), avail.top()), avail.bottom() - max(80, h))
+            self.setGeometry(x, y, w, h)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _save_window_state(self):
         app_cfg = self.config.setdefault("app", {})

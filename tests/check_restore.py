@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """验证：回溯不再报"无法打开项目"；QMessageBox 统一样式。"""
 import os
 import sys
@@ -11,6 +11,8 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app import theme
 from app.git_manager import GitManager
+import app.main_window as _mw
+_mw.save_config = lambda cfg: None   # 测试不写真实配置
 from app.main_window import MainWindow
 from app.models import Book, Chapter
 from app.storage import Storage

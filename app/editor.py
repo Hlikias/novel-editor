@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor, QFont, QPainter, QPen, QTextBlockFormat, QTextCharFormat,
     QTextCursor, QTextDocument, QTextFormat, QTextOption,
@@ -36,7 +36,10 @@ STYLE_PRESETS = {
 
 
 def count_words(text: str) -> dict:
-    """统计文本：中文字符(含中文标点)、英文单词、总字数、非空段落数。"""
+    """统计文本：中文字符(含中文标点)、英文单词、总字数、非空段落数。
+
+    总字数 = 非空白字符数（汉字 + 标点 + 数字 + 字母 + 符号），
+    与网文平台（起点/番茄等）"写多少字符算多少字"的口径一致。"""
     cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
     cjk_punct = sum(
         1 for ch in text
@@ -46,7 +49,7 @@ def count_words(text: str) -> dict:
         1 for w in text.split()
         if any(("a" <= c.lower() <= "z") for c in w)
     )
-    total = cjk + cjk_punct + en
+    total = sum(1 for ch in text if not ch.isspace())
     paragraphs = sum(1 for p in text.splitlines() if p.strip())
     return {"cjk": cjk, "en": en, "total": total, "paragraphs": paragraphs}
 
@@ -144,10 +147,18 @@ class BookmarkGutter(QWidget):
 class EditorWidget(QTextEdit):
     """主编辑器控件（富文本，支持 Word 常用格式）。"""
 
+    MAX_TEXT_WIDTH = 820   # 文字区最大宽度（窗口宽时居中）
+    MIN_MARGIN = 24        # 最小左右页边距（窗口窄时）
+    MIN_TEXT_WIDTH = 120   # 文字区最小可用宽度（防止边距过大把文字挤没）
+    PAGE_LINE_MARGIN = 56  # 兼容旧引用（固定默认边距）
+    LINE_DRAG = 6          # 边线可拖拽区域宽度（px）
+
     ai_action_requested = Signal(str)   # 右键菜单请求 AI 任务：optimize/expand/continue/condense
     write_requested = Signal()          # AI 写作输入
     query_requested = Signal(str)       # 查询选中设定
     voice_input_requested = Signal()    # 语音输入
+    new_chapter_requested = Signal()    # 右键新建章节
+    chapter_gen_requested = Signal()    # 右键 AI 生成整章（弹窗输入要求）
 
     def __init__(self, config: dict, parent=None):
         super().__init__(parent)
@@ -174,16 +185,31 @@ class EditorWidget(QTextEdit):
         self._bookmarked_lines: set[int] = set()
         self._match_text = ""       # 查找高亮关键字（滚动/编辑时保持）
         self._match_case = False
+        self._page_margin = 0       # 当前左右页边距（随窗口宽度自动调整）
+        self._manual_margin: float | None = None   # 用户手动拖拽后的边距（None=自动）
+        self._dragging_line: str | None = None     # "left"/"right" 拖动中的边线
+        self._drag_anchor = 0
+        self._drag_widget_line = 0
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
+        self.viewport().installEventFilter(self)   # 边线拖拽：过滤 viewport 事件
         self.bookmark_callback = None   # (chapter_id, line) -> bool|None
         self.bookmark_gutter = BookmarkGutter(self)
         self.line_number_area = LineNumberArea(self)
         self.document().blockCountChanged.connect(self.update_line_number_area_width)
         self.document().contentsChanged.connect(self._repaint_side_areas)
         self.verticalScrollBar().valueChanged.connect(lambda _v: self._repaint_side_areas())
+        # 内容变化导致滚动条显隐时，重算收窄后的 viewport 几何（防遮挡）
+        self.verticalScrollBar().rangeChanged.connect(
+            lambda *a: self._apply_viewport_geometry())
         # 光标移动 / 文本变化时刷新当前行高亮（只连接一次，避免重复连接累积）
         self.cursorPositionChanged.connect(self._update_extra_selections)
         self.textChanged.connect(self._update_extra_selections)
+        # 恢复用户手动拖拽过的页边距（None = 自动调整）
+        mm = self.config.get("editor", {}).get("manual_page_margin")
+        self._manual_margin = float(mm) if mm is not None else None
         self.update_line_number_area_width()
+        self._update_page_lines()
 
     def _repaint_side_areas(self):
         """内容/滚动变化时重绘行号区与书签栏并刷新当前行高亮。
@@ -210,10 +236,30 @@ class EditorWidget(QTextEdit):
         return 14 + self.fontMetrics().horizontalAdvance("9") * digits
 
     def update_line_number_area_width(self, _newBlockCount: int = 0) -> None:
-        left = BookmarkGutter.GUTTER_W
-        if self._line_numbers_visible():
-            left += self.line_number_area_width()
-        self.setViewportMargins(left, 0, 0, 0)
+        """按当前页边距收窄 viewport，让文字真正内缩。
+
+        QTextEdit 的排版宽度取自 viewport 宽度，因此收窄 viewport 即可让文字区
+        真实变窄（setViewportMargins 对 QTextEdit 正文排版无效，实测不生效）。
+        只动 viewport 几何、不碰文档：不产生撤销步、不置脏、无信号。
+        """
+        self._apply_viewport_geometry()
+
+    def _apply_viewport_geometry(self) -> None:
+        """收窄 viewport：左缘 = 书签栏+行号区+页边距；右缘 = 页边距。
+        页边线关闭时右缘让回滚动条宽度，避免被滚动条遮挡。"""
+        m = int(self._page_margin)
+        cr = self.contentsRect()
+        vp = self.viewport()
+        g = vp.geometry()
+        if m > 0:
+            right = m
+        else:
+            sb = self.verticalScrollBar()
+            right = sb.width() if sb.isVisible() else 0
+        x = cr.left() + self._left_fixed() + m
+        w = max(1, cr.width() - self._left_fixed() - m - right)
+        if g.x() != x or g.width() != w:
+            vp.setGeometry(x, g.y(), w, g.height())
 
     def update_line_number_area(self, rect, dy: int) -> None:
         if dy:
@@ -226,13 +272,171 @@ class EditorWidget(QTextEdit):
             self.update_line_number_area_width()
 
     def resizeEvent(self, event):
-        super().resizeEvent(event)
+        super().resizeEvent(event)   # QAbstractScrollArea 会在此重置 viewport 几何
         cr = self.contentsRect()
         g = BookmarkGutter.GUTTER_W
         self.bookmark_gutter.setGeometry(cr.left(), cr.top(), g, cr.height())
         self.line_number_area.setGeometry(
             cr.left() + g, cr.top(), self.line_number_area_width(), cr.height()
         )
+        self._update_page_lines()   # 窗口宽度变化时自动调整页边距
+        self._apply_viewport_geometry()   # 重设收窄后的 viewport（防 super 重置）
+
+    # ---------- 页边线（自动调整 / 手动拖拽） ----------
+    def _max_margin(self) -> float:
+        """按当前宽度能接受的最大页边距（保留 MIN_TEXT_WIDTH 文字区）。"""
+        return max(float(self.MIN_MARGIN),
+                   (self.contentsRect().width() - self._left_fixed()
+                    - self.MIN_TEXT_WIDTH) / 2)
+
+    def _update_page_lines(self):
+        """按窗口宽度自动计算左右页边距；用户手动调整过则用手动值。"""
+        enabled = bool(self.config.get("editor", {}).get("page_lines", True))
+        if not enabled:
+            if self._page_margin != 0:
+                self._page_margin = 0
+                self.update_line_number_area_width()
+                self.viewport().update()
+            return
+        max_m = self._max_margin()
+        if self._manual_margin is not None:
+            margin = max(self.MIN_MARGIN, min(max_m, self._manual_margin))
+        else:
+            fixed = self._left_fixed()
+            margin = max(self.MIN_MARGIN,
+                         min(max_m, 240.0,
+                             (self.width() - fixed - self.MAX_TEXT_WIDTH) / 2))
+        if abs(margin - self._page_margin) < 1:
+            return
+        self._page_margin = margin
+        self.update_line_number_area_width()
+        self.viewport().update()
+
+    def _left_fixed(self) -> int:
+        return BookmarkGutter.GUTTER_W + (
+            self.line_number_area_width() if self._line_numbers_visible() else 0
+        )
+
+    def _line_positions(self) -> tuple[int, int]:
+        """左右页边线在视口中的 x 坐标（viewport 左右边缘）。"""
+        w = self.viewport().width()
+        return 0, w - 1
+
+    def _near_line(self, x_vp: int) -> bool:
+        """鼠标是否在左右边线附近（视口坐标）。"""
+        xl, xr = self._line_positions()
+        return abs(x_vp - xl) <= self.LINE_DRAG or abs(x_vp - xr) <= self.LINE_DRAG
+
+    def _try_line_drag_start(self, event) -> bool:
+        """尝试在边线区域开始拖动；返回 True 表示已接管事件。"""
+        if not bool(self.config.get("editor", {}).get("page_lines", True)):
+            return False
+        if event.button() != Qt.MouseButton.LeftButton:
+            return False
+        x = event.position().toPoint().x()
+        if not self._near_line(x):
+            return False
+        xl, xr = self._line_positions()
+        if abs(x - xl) <= abs(x - xr):
+            self._dragging_line = "left"
+        else:
+            self._dragging_line = "right"
+        self._drag_anchor = x
+        # 记录边线的 widget 坐标（拖拽中作为常数参照）
+        cr = self.contentsRect()
+        m0 = int(self._page_margin)
+        if self._dragging_line == "left":
+            self._drag_widget_line = self._left_fixed() + m0
+        else:
+            self._drag_widget_line = cr.right() - m0
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
+        return True
+
+    def _line_drag_move(self, event):
+        x = event.position().toPoint().x()
+        new_line = self._drag_widget_line + (x - self._drag_anchor)
+        if self._dragging_line == "left":
+            margin = new_line - self._left_fixed()
+        else:
+            margin = self.contentsRect().right() - new_line
+        max_m = self._max_margin()
+        margin = max(self.MIN_MARGIN, min(max_m, margin))
+        self._manual_margin = margin
+        self._page_margin = margin
+        self._apply_viewport_geometry()
+        self.viewport().update()
+
+    def _line_drag_end(self):
+        self._dragging_line = None
+        self.setCursor(Qt.CursorShape.IBeamCursor)
+        # 记住手动边距到配置（仅当配置是完整应用配置时写盘，避免测试等场景覆盖真实配置）
+        try:
+            self.config.setdefault("editor", {})["manual_page_margin"] = round(self._page_margin)
+            if any(k in self.config for k in ("api", "app", "privacy", "theme")):
+                from .config import save_config
+                save_config(self.config)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def eventFilter(self, obj, ev):
+        """viewport 事件过滤器：边线区域按下/拖动调整页边距（最可靠路径）。"""
+        if obj is self.viewport():
+            t = ev.type()
+            if t == QEvent.Type.MouseButtonPress and self._try_line_drag_start(ev):
+                return True
+            if t == QEvent.Type.MouseMove:
+                if self._dragging_line:
+                    self._line_drag_move(ev)
+                    return True
+                if bool(self.config.get("editor", {}).get("page_lines", True)) \
+                        and self._near_line(ev.position().toPoint().x()):
+                    self.viewport().setCursor(Qt.CursorShape.SizeHorCursor)
+                else:
+                    self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
+            if t == QEvent.Type.MouseButtonRelease and self._dragging_line:
+                self._line_drag_end()
+                return True
+        return super().eventFilter(obj, ev)
+
+    def viewportEvent(self, event):
+        """真实鼠标事件统一入口（QTextEdit 的鼠标事件经此分发）。"""
+        t = event.type()
+        if t == QEvent.Type.MouseButtonPress and self._try_line_drag_start(event):
+            return True
+        if t == QEvent.Type.MouseMove:
+            if self._dragging_line:
+                self._line_drag_move(event)
+                return True
+            # 悬停在边线附近显示调整光标
+            if bool(self.config.get("editor", {}).get("page_lines", True)) \
+                    and self._near_line(event.position().toPoint().x()):
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            else:
+                self.setCursor(Qt.CursorShape.IBeamCursor)
+        if t == QEvent.Type.MouseButtonRelease and self._dragging_line:
+            self._line_drag_end()
+            return True
+        return super().viewportEvent(event)
+
+    def mousePressEvent(self, event):
+        if self._try_line_drag_start(event):
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._dragging_line:
+            self._line_drag_move(event)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._dragging_line:
+            self._line_drag_end()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     # ---------- 风格 ----------
     def _style_colors(self) -> dict:
@@ -240,7 +444,11 @@ class EditorWidget(QTextEdit):
         return STYLE_PRESETS.get(name, STYLE_PRESETS["暖纸"])
 
     def _apply_style(self):
-        """应用编辑器风格：背景/文字/行距。（防重入：mergeBlockFormat 会再次触发 contentsChanged）"""
+        """应用编辑器风格：背景/文字/行距/页边线。
+
+        防重入：mergeBlockFormat 会再次触发 contentsChanged。
+        防重复：行距未变化时不整篇合并块格式（大文档下这是最重的操作，
+        且会把文档置脏、连锁触发预览刷新——保存设置卡顿的根源）。"""
         if getattr(self, "_applying_style", False):
             return
         self._applying_style = True
@@ -251,17 +459,39 @@ class EditorWidget(QTextEdit):
                 f"QTextEdit {{ background-color: {colors['bg']}; color: {colors['fg']}; }}"
             )
             pct = int(self.config.get("editor", {}).get("line_height", 130))
-            fmt = QTextBlockFormat()
-            fmt.setLineHeight(max(100, pct), 1)   # 1 = ProportionalHeight
-            cursor = QTextCursor(self.document())
-            cursor.select(QTextCursor.SelectionType.Document)
-            cursor.mergeBlockFormat(fmt)
+            if pct != getattr(self, "_applied_line_height", None):
+                self._applied_line_height = pct
+                fmt = QTextBlockFormat()
+                fmt.setLineHeight(max(100, pct), 1)   # 1 = ProportionalHeight
+                cursor = QTextCursor(self.document())
+                cursor.select(QTextCursor.SelectionType.Document)
+                cursor.mergeBlockFormat(fmt)
             self.line_number_area.update()
             self.bookmark_gutter.update()
             self._update_extra_selections()
             self.viewport().update()
         finally:
             self._applying_style = False
+
+    def paintEvent(self, event):
+        """在正文区绘制左右页边线（文字在两线之间）。"""
+        super().paintEvent(event)
+        if not bool(self.config.get("editor", {}).get("page_lines", True)):
+            return
+        vp = self.viewport()
+        w = vp.width()
+        if w <= self.MIN_MARGIN * 2:
+            return
+        painter = QPainter(vp)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        colors = self._style_colors()
+        pen = QPen(QColor(colors.get("line_fg", "#9AA0A6")))
+        pen.setWidth(1)
+        painter.setPen(pen)
+        y0, y1 = 0, vp.height()
+        xl, xr = self._line_positions()
+        painter.drawLine(xl, y0, xl, y1)          # 左线（viewport 左边缘）
+        painter.drawLine(xr, y0, xr, y1)          # 右线（viewport 右边缘）
 
     def _visible_line_range(self):
         """返回 (首行号, 末行号)（基于视口坐标）。"""
@@ -323,7 +553,7 @@ class EditorWidget(QTextEdit):
         cursor = self.textCursor()
         cursor.setPosition(block.position())
         self.setTextCursor(cursor)
-        self.centerCursor()
+        self.ensureCursorVisible()   # QTextEdit 无 centerCursor
         self.setFocus()
 
     # ---------- 行号显示开关 ----------
@@ -502,17 +732,31 @@ class EditorWidget(QTextEdit):
         return f"行 {cursor.blockNumber() + 1}, 列 {cursor.columnNumber() + 1}"
 
     def apply_config(self, config: dict) -> None:
-        """设置变化后刷新编辑器外观与行为。"""
+        """设置变化后刷新编辑器外观与行为。
+
+        只在对应设置真的变化时才重排/重设，避免每次保存设置都对大文档
+        整篇重排（保存设置卡顿的主要来源）。"""
         self.config = config
         editor_cfg = config.get("editor", {})
         family = editor_cfg.get("font_family") or self._auto_font()
-        font = QFont(family)
-        font.setPointSize(int(editor_cfg.get("font_size", 14)))
-        self.setFont(font)
+        size = int(editor_cfg.get("font_size", 14))
+        cur = self.font()
+        if cur.family() != family or cur.pointSize() != size:
+            font = QFont(family)
+            font.setPointSize(size)
+            self.setFont(font)
         wrap = bool(editor_cfg.get("word_wrap", True))
-        self.setLineWrapMode(QTextEdit.WidgetWidth if wrap else QTextEdit.NoWrap)
+        want_wrap = QTextEdit.WidgetWidth if wrap else QTextEdit.NoWrap
+        if self.lineWrapMode() != want_wrap:
+            self.setLineWrapMode(want_wrap)
+        # 显式保持单词级换行策略（防止任何设置路径把它重置为不换行）
+        self.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         self.encoding = editor_cfg.get("encoding", "UTF-8")
+        # 恢复用户手动拖拽过的页边距（None = 自动调整）
+        mm = editor_cfg.get("manual_page_margin")
+        self._manual_margin = float(mm) if mm is not None else None
         self._refresh_line_numbers()
+        self._update_page_lines()
         self._update_extra_selections()
         self._apply_style()
 
@@ -554,6 +798,9 @@ class EditorWidget(QTextEdit):
         copy.setEnabled(has_sel)
         paste = menu.addAction("粘贴", self.paste)
         menu.addSeparator()
+        menu.addAction("➕ 新建章节", self.new_chapter_requested.emit)
+        menu.addSeparator()
+        menu.addAction("📖 AI 生成章节…", self.chapter_gen_requested.emit)
         menu.addAction("✨ AI 优化", lambda: self.ai_action_requested.emit("optimize"))
         menu.addAction("➕ AI 扩充", lambda: self.ai_action_requested.emit("expand"))
         menu.addAction("✍️ AI 续写", lambda: self.ai_action_requested.emit("continue"))

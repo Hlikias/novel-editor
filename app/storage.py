@@ -8,8 +8,9 @@ import sqlite3
 from typing import List, Optional
 
 from .models import (
-    AttributeItem, Book, Bookmark, Chapter, Character, ModuleDef, ModuleEntry,
-    Note, NovelMap, PlotNode, Relation, Weapon, WorldSetting, Worldview,
+    AttributeItem, Book, Bookmark, Chapter, ChapterCard, Character,
+    CharacterArc, Foreshadow, ModuleDef, ModuleEntry, Note, NovelMap, PlotNode,
+    PowerLevel, Relation, TimelineEvent, Weapon, WorldSetting, Worldview,
 )
 
 SCHEMA = """
@@ -86,6 +87,62 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     chapter_id INTEGER NOT NULL,
     line INTEGER DEFAULT 1,
     note TEXT DEFAULT '',
+    created_at TEXT DEFAULT ''
+);
+-- 前期大纲（设定与设计）
+CREATE TABLE IF NOT EXISTS foreshadows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL,
+    name TEXT DEFAULT '',
+    desc TEXT DEFAULT '',
+    plant_chapter TEXT DEFAULT '',
+    harvest_chapter TEXT DEFAULT '',
+    status TEXT DEFAULT '待埋',
+    created_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS chapter_cards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL,
+    chapter_id INTEGER DEFAULT 0,
+    title TEXT DEFAULT '',
+    goal TEXT DEFAULT '',
+    conflict TEXT DEFAULT '',
+    twist TEXT DEFAULT '',
+    hook TEXT DEFAULT '',
+    characters TEXT DEFAULT '',
+    foreshadows TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    created_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS power_levels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL,
+    system_name TEXT DEFAULT '',
+    level TEXT DEFAULT '',
+    stage TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    breakthrough TEXT DEFAULT '',
+    power_note TEXT DEFAULT '',
+    "order" INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS character_arcs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL,
+    character_id INTEGER DEFAULT 0,
+    start_state TEXT DEFAULT '',
+    turning_point TEXT DEFAULT '',
+    end_state TEXT DEFAULT '',
+    created_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS timeline_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL,
+    title TEXT DEFAULT '',
+    chapter TEXT DEFAULT '',
+    characters TEXT DEFAULT '',
+    result TEXT DEFAULT '',
+    "order" INTEGER DEFAULT 0,
     created_at TEXT DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS worldviews (
@@ -755,6 +812,167 @@ class Storage:
 
     def max_plot_order(self) -> int:
         row = self.conn.execute("SELECT COALESCE(MAX(\"order\"), 0) AS m FROM plot_nodes").fetchone()
+        return int(row["m"])
+
+    # ---------- 伏笔追踪 ----------
+    def list_foreshadows(self) -> List[Foreshadow]:
+        rows = self.conn.execute("SELECT * FROM foreshadows ORDER BY id ASC").fetchall()
+        return [Foreshadow(**dict(r)) for r in rows]
+
+    def add_foreshadow(self, f: Foreshadow) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO foreshadows (book_id, name, desc, plant_chapter, harvest_chapter, status, created_at)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (f.book_id, f.name, f.desc, f.plant_chapter, f.harvest_chapter, f.status, f.created_at),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_foreshadow(self, f: Foreshadow) -> None:
+        self.conn.execute(
+            "UPDATE foreshadows SET name=?, desc=?, plant_chapter=?, harvest_chapter=?, status=? WHERE id=?",
+            (f.name, f.desc, f.plant_chapter, f.harvest_chapter, f.status, f.id),
+        )
+        self.conn.commit()
+
+    def delete_foreshadow(self, fid: int) -> None:
+        self.conn.execute("DELETE FROM foreshadows WHERE id=?", (fid,))
+        self.conn.commit()
+
+    # ---------- 章节大纲卡片 ----------
+    def list_chapter_cards(self) -> List[ChapterCard]:
+        rows = self.conn.execute("SELECT * FROM chapter_cards ORDER BY id ASC").fetchall()
+        return [ChapterCard(**dict(r)) for r in rows]
+
+    def get_chapter_card(self, cid: int) -> Optional[ChapterCard]:
+        row = self.conn.execute("SELECT * FROM chapter_cards WHERE id=?", (cid,)).fetchone()
+        return ChapterCard(**dict(row)) if row else None
+
+    def add_chapter_card(self, c: ChapterCard) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO chapter_cards (book_id, chapter_id, title, goal, conflict, twist, hook,"
+            " characters, foreshadows, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (c.book_id, c.chapter_id, c.title, c.goal, c.conflict, c.twist, c.hook,
+             c.characters, c.foreshadows, c.notes, c.created_at),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_chapter_card(self, c: ChapterCard) -> None:
+        self.conn.execute(
+            "UPDATE chapter_cards SET chapter_id=?, title=?, goal=?, conflict=?, twist=?, hook=?,"
+            " characters=?, foreshadows=?, notes=? WHERE id=?",
+            (c.chapter_id, c.title, c.goal, c.conflict, c.twist, c.hook,
+             c.characters, c.foreshadows, c.notes, c.id),
+        )
+        self.conn.commit()
+
+    def delete_chapter_card(self, cid: int) -> None:
+        self.conn.execute("DELETE FROM chapter_cards WHERE id=?", (cid,))
+        self.conn.commit()
+
+    # ---------- 力量体系 / 境界 ----------
+    def list_power_levels(self, system: str = "") -> List[PowerLevel]:
+        if system:
+            rows = self.conn.execute(
+                "SELECT * FROM power_levels WHERE system_name=? ORDER BY \"order\" ASC, id ASC",
+                (system,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM power_levels ORDER BY \"order\" ASC, id ASC").fetchall()
+        return [PowerLevel(**dict(r)) for r in rows]
+
+    def list_power_systems(self) -> list[str]:
+        rows = self.conn.execute(
+            "SELECT DISTINCT system_name FROM power_levels WHERE system_name<>'' ORDER BY system_name"
+        ).fetchall()
+        return [r["system_name"] for r in rows]
+
+    def add_power_level(self, p: PowerLevel) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO power_levels (book_id, system_name, level, stage, description,"
+            " breakthrough, power_note, \"order\", created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (p.book_id, p.system_name, p.level, p.stage, p.description,
+             p.breakthrough, p.power_note, p.order, p.created_at),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_power_level(self, p: PowerLevel) -> None:
+        self.conn.execute(
+            "UPDATE power_levels SET system_name=?, level=?, stage=?, description=?,"
+            " breakthrough=?, power_note=?, \"order\"=? WHERE id=?",
+            (p.system_name, p.level, p.stage, p.description,
+             p.breakthrough, p.power_note, p.order, p.id),
+        )
+        self.conn.commit()
+
+    def delete_power_level(self, pid: int) -> None:
+        self.conn.execute("DELETE FROM power_levels WHERE id=?", (pid,))
+        self.conn.commit()
+
+    # ---------- 人物弧光 ----------
+    def list_character_arcs(self) -> List[CharacterArc]:
+        rows = self.conn.execute("SELECT * FROM character_arcs ORDER BY id ASC").fetchall()
+        return [CharacterArc(**dict(r)) for r in rows]
+
+    def get_character_arc(self, char_id: int) -> Optional[CharacterArc]:
+        row = self.conn.execute(
+            "SELECT * FROM character_arcs WHERE character_id=? ORDER BY id ASC LIMIT 1",
+            (char_id,),
+        ).fetchone()
+        return CharacterArc(**dict(row)) if row else None
+
+    def add_character_arc(self, a: CharacterArc) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO character_arcs (book_id, character_id, start_state, turning_point, end_state, created_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (a.book_id, a.character_id, a.start_state, a.turning_point, a.end_state, a.created_at),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_character_arc(self, a: CharacterArc) -> None:
+        self.conn.execute(
+            "UPDATE character_arcs SET start_state=?, turning_point=?, end_state=? WHERE id=?",
+            (a.start_state, a.turning_point, a.end_state, a.id),
+        )
+        self.conn.commit()
+
+    def delete_character_arc(self, aid: int) -> None:
+        self.conn.execute("DELETE FROM character_arcs WHERE id=?", (aid,))
+        self.conn.commit()
+
+    # ---------- 关键事件时间线 ----------
+    def list_timeline_events(self) -> List[TimelineEvent]:
+        rows = self.conn.execute(
+            "SELECT * FROM timeline_events ORDER BY \"order\" ASC, id ASC").fetchall()
+        return [TimelineEvent(**dict(r)) for r in rows]
+
+    def add_timeline_event(self, e: TimelineEvent) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO timeline_events (book_id, title, chapter, characters, result, \"order\", created_at)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (e.book_id, e.title, e.chapter, e.characters, e.result, e.order, e.created_at),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_timeline_event(self, e: TimelineEvent) -> None:
+        self.conn.execute(
+            "UPDATE timeline_events SET title=?, chapter=?, characters=?, result=?, \"order\"=? WHERE id=?",
+            (e.title, e.chapter, e.characters, e.result, e.order, e.id),
+        )
+        self.conn.commit()
+
+    def delete_timeline_event(self, eid: int) -> None:
+        self.conn.execute("DELETE FROM timeline_events WHERE id=?", (eid,))
+        self.conn.commit()
+
+    def max_timeline_order(self) -> int:
+        row = self.conn.execute(
+            "SELECT COALESCE(MAX(\"order\"), 0) AS m FROM timeline_events").fetchone()
         return int(row["m"])
 
     # ---------- 角色关系 ----------

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """离线冒烟测试：验证主窗口、存储、各弹窗、控制台。"""
 import os
 import sys
@@ -10,6 +10,8 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app import theme
+import app.main_window as _mw
+_mw.save_config = lambda cfg: None   # 测试不写真实配置
 from app.main_window import MainWindow
 from app.models import AttributeItem, Book, Chapter, Character, Weapon
 from app.storage import Storage

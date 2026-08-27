@@ -15,6 +15,18 @@ from PySide6.QtWidgets import (
     QPushButton, QVBoxLayout, QWidget,
 )
 
+# 常见"模型名别名" → 规范模型名（用户常把服务名当作模型名填写，
+# 例如 DeepSeek 官方现在要求 deepseek-v4-flash 等，直接填 deepseek 会 400）
+MODEL_ALIASES = {
+    "deepseek": "deepseek-v4-flash",
+}
+
+
+def normalize_model(model: str) -> str:
+    """模型名归一化：命中别名表时替换为规范名，否则原样返回。"""
+    m = (model or "").strip()
+    return MODEL_ALIASES.get(m.lower(), m)
+
 
 class AICallWorker(QThread):
     """后台调用 AI API，避免卡界面；支持流式输出。"""
@@ -37,56 +49,90 @@ class AICallWorker(QThread):
 
     def run(self):
         try:
-            url = self.base_url.rstrip("/") + "/chat/completions"
-            payload = {
-                "model": self.model,
-                "temperature": self.temperature,
-                "stream": self.stream,
-                "messages": [
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": self.user_prompt},
-                ],
-            }
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            }
-            req = urllib.request.Request(
-                url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                headers=headers,
-            )
-            with urllib.request.urlopen(req, timeout=300) as resp:
-                if self.stream:
-                    # SSE 流式：逐行解析 "data: {...}"
-                    content: list[str] = []
-                    for raw in resp:
-                        if self.isInterruptionRequested():
-                            self.finished_err.emit("已取消")
-                            return
-                        line = raw.decode("utf-8", "ignore").strip()
-                        if not line.startswith("data:"):
-                            continue
-                        data = line[5:].strip()
-                        if data == "[DONE]":
-                            break
-                        try:
-                            obj = json.loads(data)
-                            delta = obj["choices"][0]["delta"].get("content", "")
-                        except Exception:  # noqa: BLE001
-                            continue
-                        if delta:
-                            content.append(delta)
-                            self.chunk_received.emit(delta)
-                    self.finished_ok.emit("".join(content))
-                else:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    content = data["choices"][0]["message"]["content"]
-                    self.finished_ok.emit(content)
+            self._request(include_temperature=True)
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "ignore")
-            self.finished_err.emit(f"HTTP {e.code}: {body[:500]}")
+            msg = self._fmt_http_error(e.code, body)
+            # 部分推理模型（如 deepseek-reasoner、o1 系列）不接受 temperature 参数：
+            # 400 且报错提到 temperature 时，去掉该参数自动重试一次
+            if (e.code == 400 and "temperature" in body.lower()
+                    and not getattr(self, "_retried_no_temp", False)):
+                self._retried_no_temp = True
+                try:
+                    self._request(include_temperature=False)
+                    return
+                except urllib.error.HTTPError as e2:
+                    self.finished_err.emit(self._fmt_http_error(
+                        e2.code, e2.read().decode("utf-8", "ignore")))
+                    return
+                except Exception as ex2:  # noqa: BLE001
+                    self.finished_err.emit(str(ex2))
+                    return
+            self.finished_err.emit(msg)
         except Exception as e:  # noqa: BLE001
             self.finished_err.emit(str(e))
+
+    def _request(self, include_temperature: bool):
+        """发一次请求；成功时 emit chunk/ok，失败抛 HTTPError/异常。"""
+        url = self.base_url.rstrip("/") + "/chat/completions"
+        payload = {
+            "model": self.model,
+            "stream": self.stream,
+            "messages": [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": self.user_prompt},
+            ],
+        }
+        if include_temperature:
+            payload["temperature"] = self.temperature
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        req = urllib.request.Request(
+            url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers=headers,
+        )
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            if self.stream:
+                # SSE 流式：逐行解析 "data: {...}"
+                content: list[str] = []
+                for raw in resp:
+                    if self.isInterruptionRequested():
+                        self.finished_err.emit("已取消")
+                        return
+                    line = raw.decode("utf-8", "ignore").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data)
+                        delta = obj["choices"][0]["delta"].get("content", "")
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if delta:
+                        content.append(delta)
+                        self.chunk_received.emit(delta)
+                self.finished_ok.emit("".join(content))
+            else:
+                data = json.loads(resp.read().decode("utf-8"))
+                content = data["choices"][0]["message"]["content"]
+                self.finished_ok.emit(content)
+
+    @staticmethod
+    def _fmt_http_error(code: int, body: str) -> str:
+        """格式化 HTTP 错误：尽量提取服务端 error.message，提示更可读。"""
+        msg = f"HTTP {code}: {body[:500]}"
+        try:
+            obj = json.loads(body)
+            em = (obj.get("error") or {}).get("message")
+            if isinstance(em, str) and em.strip():
+                msg = f"HTTP {code}: {em.strip()[:500]}"
+        except Exception:  # noqa: BLE001
+            pass
+        return msg
 
 
 class AIPanel(QWidget):
@@ -177,7 +223,9 @@ class AIPanel(QWidget):
         api_cfg = self.config.get("api", {})
         base_url = api_cfg.get("base_url", "").strip()
         api_key = api_cfg.get("api_key", "").strip()
-        model = api_cfg.get("model", "").strip()
+        model = normalize_model(api_cfg.get("model", ""))
+        if model != (api_cfg.get("model") or "").strip():
+            api_cfg["model"] = model   # 别名自动纠正，同步到内存配置
         prompt = self.prompt_edit.toPlainText().strip()
         blocked = self._privacy_blocked()
         if blocked:
@@ -211,7 +259,12 @@ class AIPanel(QWidget):
         api_cfg = self.config.get("api", {})
         base_url = api_cfg.get("base_url", "").strip()
         api_key = api_cfg.get("api_key", "").strip()
-        model = api_cfg.get("model", "").strip()
+        model = normalize_model(api_cfg.get("model", ""))
+        if model != (api_cfg.get("model") or "").strip():
+            api_cfg["model"] = model   # 别名自动纠正，同步到内存配置
+        self._last_prompt = prompt
+        self._last_stream = stream
+        self._model_retried = False   # 每个新任务都允许一次"模型名 400 自动重试"
         blocked = self._privacy_blocked()
         if blocked:
             if on_done:
@@ -245,6 +298,13 @@ class AIPanel(QWidget):
         self._worker.finished_err.connect(lambda err, _t=token: self._on_task_err(err, _t))
         self._worker.start()
 
+    @staticmethod
+    def _extract_supported_model(err: str) -> str | None:
+        """从 400 报错中提取服务端支持的第一个模型名。"""
+        import re
+        m = re.search(r"supported API model names are\s+([\w\-\.]+)", err)
+        return m.group(1) if m else None
+
     def _on_task_ok(self, text: str, token: int):
         if token != getattr(self, "_task_token", 0):
             return   # 过期任务的结果，忽略
@@ -258,6 +318,18 @@ class AIPanel(QWidget):
     def _on_task_err(self, err: str, token: int):
         if token != getattr(self, "_task_token", 0):
             return
+        # 模型名不受支持（HTTP 400 提示 supported API model names）：
+        # 自动采用服务端支持列表中的模型，更新配置后重试一次
+        if (not getattr(self, "_model_retried", False)
+                and "supported API model names" in (err or "")):
+            new_model = self._extract_supported_model(err or "")
+            if new_model:
+                self._model_retried = True
+                self.config.setdefault("api", {})["model"] = new_model
+                self.status_label.setText(f"⏳ 模型名已自动修正为 {new_model}，重试中…")
+                self.run_task(self._last_prompt, self._task_callback,
+                              stream=self._last_stream)
+                return
         self.status_label.setText("❌ 失败")
         cb = getattr(self, "_task_callback", None)
         if cb:

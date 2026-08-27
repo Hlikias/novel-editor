@@ -619,6 +619,29 @@ QStatusBar QLabel {
     color: {STATUSTEXT};
 }
 
+/* ================= 输入框（无边框，统一样式） ================= */
+QInputDialog {
+    background-color: {WINDOW};
+    color: {TEXT};
+    border: 1px solid {SEPLINE};
+    border-radius: 12px;
+}
+QInputDialog QLabel {
+    color: {TEXT};
+    background: transparent;
+}
+QInputDialog QLineEdit, QInputDialog QComboBox,
+QInputDialog QSpinBox, QInputDialog QDoubleSpinBox {
+    background-color: {INPUT};
+    border: none;
+    border-radius: 8px;
+    padding: 4px 8px;
+    color: {TEXT};
+}
+QInputDialog QPushButton {
+    min-width: 64px;
+}
+
 /* ================= 弹窗主体卡片 / 关闭按钮 ================= */
 QDialog#gradientDialog {
     background: {PANE};

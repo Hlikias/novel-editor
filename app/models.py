@@ -200,3 +200,74 @@ class Bookmark:
     line: int = 1
     note: str = ""
     created_at: str = field(default_factory=_now)
+
+
+# ---------- 前期大纲（设定与设计） ----------
+@dataclass
+class Foreshadow:
+    """伏笔：埋设 → 回收 全流程追踪。"""
+    id: int = 0
+    book_id: int = 0
+    name: str = ""                 # 伏笔名（如：古剑来历）
+    desc: str = ""                 # 说明
+    plant_chapter: str = ""        # 埋设章节（文本，如：第 3 章）
+    harvest_chapter: str = ""      # 计划回收章节
+    status: str = "待埋"           # 待埋 / 已埋 / 待收 / 已收
+    created_at: str = field(default_factory=_now)
+
+
+@dataclass
+class ChapterCard:
+    """章节大纲卡片：写某一章前的规划（目标/冲突/转折/钩子/人物/伏笔）。"""
+    id: int = 0
+    book_id: int = 0
+    chapter_id: int = 0            # 关联章节（0=未关联）
+    title: str = ""                # 卡片名 / 章节名
+    goal: str = ""                 # 本章目标
+    conflict: str = ""             # 冲突
+    twist: str = ""                # 转折
+    hook: str = ""                 # 结尾钩子
+    characters: str = ""           # 出场人物（逗号分隔）
+    foreshadows: str = ""          # 本章埋/收的伏笔（逗号分隔）
+    notes: str = ""
+    created_at: str = field(default_factory=_now)
+
+
+@dataclass
+class PowerLevel:
+    """力量体系 / 境界表：一个体系下的一个等级。"""
+    id: int = 0
+    book_id: int = 0
+    system_name: str = ""          # 体系名（如：炼气体系）
+    level: str = ""                # 等级名（如：筑基）
+    stage: str = ""                # 阶段（初期/中期/圆满…，可空）
+    description: str = ""          # 描述
+    breakthrough: str = ""         # 突破条件
+    power_note: str = ""           # 战力对照（可选）
+    order: int = 0
+    created_at: str = field(default_factory=_now)
+
+
+@dataclass
+class CharacterArc:
+    """人物弧光：心理/性格的转变规划。"""
+    id: int = 0
+    book_id: int = 0
+    character_id: int = 0
+    start_state: str = ""          # 起点状态
+    turning_point: str = ""        # 关键转折
+    end_state: str = ""            # 终点状态
+    created_at: str = field(default_factory=_now)
+
+
+@dataclass
+class TimelineEvent:
+    """关键事件时间线。"""
+    id: int = 0
+    book_id: int = 0
+    title: str = ""                # 事件名
+    chapter: str = ""              # 发生章节
+    characters: str = ""           # 相关角色
+    result: str = ""               # 结果/影响
+    order: int = 0
+    created_at: str = field(default_factory=_now)

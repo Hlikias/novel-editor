@@ -16,7 +16,13 @@ def html_to_plain(text: str) -> str:
                          "<ul", "<ol", "<li", "<font", "<pre", "<strong",
                          "<em", "<b", "<i", "<u", "<br", "<blockquote")):
         return text
-    s = re.sub(r"<br\s*/?>", "\n", text)
+    # 先整块剥掉非正文内容：Qt 的 toHtml() 会在 <head> 里带一段默认样式表
+    # （p,li{white-space:pre-wrap} / hr / 任务列表复选框），标签剥离正则
+    # 只删标签、会把这段 CSS 文本原样留在结果里。
+    s = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.S | re.I)
+    s = re.sub(r"<head[^>]*>.*?</head>", "", s, flags=re.S | re.I)
+    s = re.sub(r"<script[^>]*>.*?</script>", "", s, flags=re.S | re.I)
+    s = re.sub(r"<br\s*/?>", "\n", s)
     s = re.sub(r"</(p|div|h[1-6]|li|blockquote)>", "\n", s)
     s = re.sub(r"<[^>]+>", "", s)
     return _html.unescape(s).strip()

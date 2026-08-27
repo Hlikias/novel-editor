@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """验证插件系统：加载 / 菜单数据 / 回调。"""
 import os
 import sys
@@ -9,6 +9,8 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from PySide6.QtWidgets import QApplication
 
+import app.main_window as _mw
+_mw.save_config = lambda cfg: None   # 测试不写真实配置
 from app.main_window import MainWindow
 from app.plugin_manager import PluginManager, PLUGIN_DIR
 

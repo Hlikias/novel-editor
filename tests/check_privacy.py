@@ -51,6 +51,9 @@ assert sdlg.ai_net_check.isEnabled() and sdlg.quote_net_check.isEnabled()
 print("4) 设置弹窗隐私页联动 OK")
 
 # 5) 查询隐私：严格模式（默认）下本地未命中不联网
+# 不依赖真实磁盘配置（避免被其它测试写入的状态干扰），固定为严格模式
+import app.quote_dock as qd_mod
+qd_mod.load_config = lambda: {"privacy": {"strict": True, "network_quotes": False}}
 tmp = tempfile.mkdtemp()
 os.makedirs(tmp, exist_ok=True)
 # 用临时 config 文件模拟严格模式

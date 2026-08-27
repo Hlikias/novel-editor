@@ -19,10 +19,12 @@ print("歇后语格式化 OK:", out2)
 qd = QuoteDock()
 qd.show()
 app.processEvents()
-assert qd.tabs.count() == 3, qd.tabs.count()
+assert qd.tabs.count() >= 3, qd.tabs.count()   # 成语/歇后语/网络用语等（后续可能新增）
 print("QuoteDock tabs 数:", qd.tabs.count())
 qd.close()
 
+import app.main_window as _mw
+_mw.save_config = lambda cfg: None   # 测试不写真实配置
 from app.main_window import MainWindow
 win = MainWindow()
 win.show()

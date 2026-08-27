@@ -91,7 +91,9 @@ print("5) 滚轮缩放/适应窗口 OK")
 # 6) 世界观表单自适应（字段随宽度增长）
 from app.dialogs.character_dialog import WorldviewTab
 wvt = WorldviewTab(st)
-assert wvt._custom_edits.get("核心法则").sizePolicy().horizontalPolicy() != 0
+core = next((r["value"] for r in wvt._field_rows
+             if r["label"].text().strip() == "核心法则"), None)
+assert core is not None and core.sizePolicy().horizontalPolicy() != 0
 form_policy = wvt.findChild(__import__("PySide6.QtWidgets", fromlist=["QFormLayout"]).QFormLayout)
 print("6) 世界观表单 fieldGrowthPolicy:", form_policy.fieldGrowthPolicy() if form_policy else "n/a")
 dlg.close()

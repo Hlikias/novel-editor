@@ -25,7 +25,8 @@ class SettingsDialog(GradientDialog):
         self.on_apply = on_apply
         self.shortcut_actions = shortcut_actions
         self._seq_edits: list[QKeySequenceEdit] = []
-        self.setMinimumWidth(480)
+        self.setMinimumSize(640, 560)
+        self.resize(820, 660)   # 初始尺寸（若用户保存过几何则以其为准）
 
         layout = self.body
         self.tabs = QTabWidget()
@@ -105,9 +106,29 @@ class SettingsDialog(GradientDialog):
         self.api_key_edit.setPlaceholderText("sk-...")
         api_form.addRow("API 密钥", self.api_key_edit)
 
-        self.model_edit = QLineEdit(api.get("model", ""))
-        self.model_edit.setPlaceholderText("gpt-4o-mini / deepseek-chat / qwen-max …")
-        api_form.addRow("模型名称", self.model_edit)
+        self.model_combo = QComboBox()
+        self.model_combo.setEditable(True)
+        self.model_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        # 常用模型候选（可按需手输其它模型名）
+        MODEL_PRESETS = [
+            "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp",
+            "deepseek-chat", "deepseek-reasoner",
+            "gpt-4o", "gpt-4o-mini", "qwen-max", "qwen-plus", "glm-4-flash",
+        ]
+        for m in MODEL_PRESETS:
+            self.model_combo.addItem(m)
+        cur_model = (api.get("model", "") or "").strip()
+        from ..ai_panel import normalize_model
+        cur_model = normalize_model(cur_model)   # 别名（如 deepseek）显示为规范模型名
+        if cur_model:
+            idx = self.model_combo.findText(cur_model)
+            self.model_combo.setCurrentIndex(max(0, idx))
+            if idx < 0:
+                self.model_combo.setEditText(cur_model)
+        self.model_combo.setToolTip(
+            "填入你的 API 支持的模型名；若提示模型名不支持，请按报错里列出的支持列表填写"
+        )
+        api_form.addRow("模型名称", self.model_combo)
 
         self.temp_spin = QDoubleSpinBox()
         self.temp_spin.setRange(0.0, 2.0)
@@ -141,6 +162,17 @@ class SettingsDialog(GradientDialog):
         self.wrap_check = QCheckBox("自动换行（超出窗口宽度自动折行）")
         self.wrap_check.setChecked(bool(ed.get("word_wrap", True)))
         editor_form.addRow("", self.wrap_check)
+
+        self.page_lines_check = QCheckBox("左右页边线（文字在两线之间）")
+        self.page_lines_check.setChecked(bool(ed.get("page_lines", True)))
+        editor_form.addRow("", self.page_lines_check)
+
+        self.page_margin_spin = QSpinBox()
+        self.page_margin_spin.setRange(0, 400)
+        self.page_margin_spin.setSpecialValueText("自动")
+        self.page_margin_spin.setValue(int(ed.get("manual_page_margin", 0)))
+        self.page_margin_spin.setToolTip("0=自动（窗口宽时居中 820px，窄时 24px）\n24-400=固定手动页边距（像素）")
+        editor_form.addRow("左右页边距", self.page_margin_spin)
 
         self.lineno_check = QCheckBox("显示行号")
         self.lineno_check.setChecked(bool(ed.get("show_line_numbers", True)))
@@ -316,7 +348,7 @@ class SettingsDialog(GradientDialog):
         api = self.config.setdefault("api", {})
         api["base_url"] = self.base_url_edit.text().strip()
         api["api_key"] = self.api_key_edit.text().strip()
-        api["model"] = self.model_edit.text().strip()
+        api["model"] = self.model_combo.currentText().strip()
         api["temperature"] = self.temp_spin.value()
         api["system_prompt"] = self.system_edit.text().strip()
 
@@ -324,6 +356,12 @@ class SettingsDialog(GradientDialog):
         ed["tab_size"] = self.tab_size_spin.value()
         ed["auto_first_line_indent"] = self.indent_check.isChecked()
         ed["word_wrap"] = self.wrap_check.isChecked()
+        ed["page_lines"] = self.page_lines_check.isChecked()
+        pm = self.page_margin_spin.value()
+        if pm > 0:
+            ed["manual_page_margin"] = pm
+        else:
+            ed.pop("manual_page_margin", None)   # 0=自动
         ed["show_line_numbers"] = self.lineno_check.isChecked()
         ed["highlight_current_line"] = self.hilite_check.isChecked()
         ed["font_size"] = self.font_size_spin.value()

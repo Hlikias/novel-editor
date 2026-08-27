@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """特性测试：金句/成语格式化、题材模板、按钮顺序、总览 dock。"""
 import os
 import sys
@@ -10,6 +10,8 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 from PySide6.QtWidgets import QApplication
 
 from app.dialogs.character_dialog import CharacterDialog, WorldviewTab
+import app.main_window as _mw
+_mw.save_config = lambda cfg: None   # 测试不写真实配置
 from app.main_window import MainWindow
 from app.models import (Book, Chapter, Character, ModuleDef, ModuleEntry,
                         PlotNode, Worldview)

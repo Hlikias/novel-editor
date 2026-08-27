@@ -16,7 +16,7 @@ from datetime import datetime
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QCursor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame,
+    QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QGroupBox,
     QGraphicsEllipseItem, QGraphicsItem, QGraphicsLineItem, QGraphicsRectItem,
     QGraphicsScene, QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
@@ -414,21 +414,34 @@ class CharacterTab(QWidget):
         lv.addLayout(row)
         splitter.addWidget(left)
 
-        # 右：表单（左侧留白，避免贴住列表）
+        # 右：表单（按模块分组进 QGroupBox；垂直 splitter 可自由调整各组高度比例）
         right = QWidget()
-        # 两列网格：短字段一排两个
-        grid = QGridLayout(right)
-        grid.setContentsMargins(16, 0, 0, 0)
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(6)
+        rv = QVBoxLayout(right)
+        rv.setContentsMargins(16, 0, 0, 0)
+        rv.setSpacing(6)
+        vsplit = QSplitter(Qt.Orientation.Vertical, right)
+        vsplit.setChildrenCollapsible(False)
+        _gbox_qss = (
+            "QGroupBox{border:1px solid rgba(120,120,120,70);border-radius:8px;"
+            "margin-top:14px;padding:8px 4px 4px 4px;background:transparent;font-weight:bold;}"
+            "QGroupBox::title{subcontrol-origin:margin;left:10px;padding:0 4px;}"
+        )
+
+        # ---------- 组1：角色 → 阵营（基础信息） ----------
+        g1 = QGroupBox("角色 → 阵营（基础信息）")
+        g1.setStyleSheet(_gbox_qss)
+        grid1 = QGridLayout(g1)
+        grid1.setContentsMargins(12, 8, 8, 8)
+        grid1.setHorizontalSpacing(14)
+        grid1.setVerticalSpacing(6)
 
         self.name_edit = QLineEdit()
         self.worldview_combo = QComboBox()
         self.worldview_combo.currentIndexChanged.connect(self._on_worldview_changed)
-        grid.addWidget(QLabel("姓名"), 0, 0)
-        grid.addWidget(self.name_edit, 0, 1)
-        grid.addWidget(QLabel("绑定世界观"), 0, 2)
-        grid.addWidget(self.worldview_combo, 0, 3)
+        grid1.addWidget(QLabel("姓名"), 0, 0)
+        grid1.addWidget(self.name_edit, 0, 1)
+        grid1.addWidget(QLabel("绑定世界观"), 0, 2)
+        grid1.addWidget(self.worldview_combo, 0, 3)
 
         self.role_combo = QComboBox()
         self.role_combo.setEditable(True)   # 身份可自定义
@@ -436,10 +449,10 @@ class CharacterTab(QWidget):
         self.gender_combo = QComboBox()
         self.gender_combo.setEditable(True)
         self.gender_combo.addItems(["男", "女", "其他", "未知"])
-        grid.addWidget(QLabel("身份"), 1, 0)
-        grid.addWidget(self.role_combo, 1, 1)
-        grid.addWidget(QLabel("性别"), 1, 2)
-        grid.addWidget(self.gender_combo, 1, 3)
+        grid1.addWidget(QLabel("身份"), 1, 0)
+        grid1.addWidget(self.role_combo, 1, 1)
+        grid1.addWidget(QLabel("性别"), 1, 2)
+        grid1.addWidget(self.gender_combo, 1, 3)
 
         self.age_spin = QSpinBox()
         self.age_spin.setRange(0, 2000)
@@ -449,80 +462,87 @@ class CharacterTab(QWidget):
         self.age_spin.valueChanged.connect(lambda _v: setattr(self, "_age_raw", None))
         self.tags_edit = QLineEdit()
         self.tags_edit.setPlaceholderText("冷静, 毒舌, 傲娇…")
-        grid.addWidget(QLabel("年龄"), 2, 0)
-        grid.addWidget(self.age_spin, 2, 1)
-        grid.addWidget(QLabel("性格标签"), 2, 2)
-        grid.addWidget(self.tags_edit, 2, 3)
+        grid1.addWidget(QLabel("年龄"), 2, 0)
+        grid1.addWidget(self.age_spin, 2, 1)
+        grid1.addWidget(QLabel("性格标签"), 2, 2)
+        grid1.addWidget(self.tags_edit, 2, 3)
 
         self.faction_edit = QLineEdit()
         self.faction_edit.setPlaceholderText("如：正派 / 魔教 / 中立（关系图按阵营着色）")
-        grid.addWidget(QLabel("阵营"), 3, 0)
-        grid.addWidget(self.faction_edit, 3, 1, 1, 3)
+        grid1.addWidget(QLabel("阵营"), 3, 0)
+        grid1.addWidget(self.faction_edit, 3, 1, 1, 3)
+        vsplit.addWidget(g1)
 
-        # 自定义属性（动态 标签:值 行，可删可改标签，排在成长路线前）
-        row = 4
+        # ---------- 组2：属性 & 成长路线 ----------
+        g2 = QGroupBox("属性 & 成长路线")
+        g2.setStyleSheet(_gbox_qss)
+        grid2 = QGridLayout(g2)
+        grid2.setContentsMargins(12, 8, 8, 8)
+        grid2.setHorizontalSpacing(14)
+        grid2.setVerticalSpacing(6)
         extra_title = QLabel("属性（欲望/恐惧/缺陷等，标签可改、可删、可添加）")
         extra_title.setObjectName("mutedLabel")
-        grid.addWidget(extra_title, row, 0)
+        grid2.addWidget(extra_title, 0, 0)
         self.extra_fields = DynamicFieldGrid(add_text="➕ 添加字段", label_w=130)
-        grid.addWidget(self.extra_fields, row, 1, 1, 3)
-        row += 1
-
-        # 全宽字段
-        grid.addWidget(QLabel("成长路线"), row, 0)
+        grid2.addWidget(self.extra_fields, 0, 1, 1, 3)
+        grid2.addWidget(QLabel("成长路线"), 1, 0)
         self.growth_edit = QPlainTextEdit()
         self.growth_edit.setMaximumHeight(52)
         self.growth_edit.setPlaceholderText("成长路线：从…到…（文字描述）")
-        grid.addWidget(self.growth_edit, row, 1, 1, 3)
+        grid2.addWidget(self.growth_edit, 1, 1, 1, 3)
         growth_flow_btn = QPushButton("📈 成长流程图…")
         growth_flow_btn.clicked.connect(self._open_growth_flow)
-        grid.addWidget(growth_flow_btn, row + 1, 1, 1, 3)
-        row += 2
+        grid2.addWidget(growth_flow_btn, 2, 1, 1, 3)
+        vsplit.addWidget(g2)
 
-        grid.addWidget(QLabel("外貌"), row, 0)
+        # ---------- 组3：外貌 → 备注（人物描述） ----------
+        g3 = QGroupBox("外貌 → 备注（人物描述）")
+        g3.setStyleSheet(_gbox_qss)
+        grid3 = QGridLayout(g3)
+        grid3.setContentsMargins(12, 8, 8, 8)
+        grid3.setHorizontalSpacing(14)
+        grid3.setVerticalSpacing(6)
+        grid3.addWidget(QLabel("外貌"), 0, 0)
         self.appearance_edit = QPlainTextEdit()
         self.appearance_edit.setMaximumHeight(46)
-        grid.addWidget(self.appearance_edit, row, 1, 1, 3)
-        row += 1
-
-        grid.addWidget(QLabel("性格"), row, 0)
+        grid3.addWidget(self.appearance_edit, 0, 1, 1, 3)
+        grid3.addWidget(QLabel("性格"), 1, 0)
         self.personality_edit = QPlainTextEdit()
         self.personality_edit.setMaximumHeight(46)
-        grid.addWidget(self.personality_edit, row, 1, 1, 3)
-        row += 1
-
-        grid.addWidget(QLabel("背景经历"), row, 0)
+        grid3.addWidget(self.personality_edit, 1, 1, 1, 3)
+        grid3.addWidget(QLabel("背景经历"), 2, 0)
         self.background_edit = QPlainTextEdit()
         self.background_edit.setMaximumHeight(46)
-        grid.addWidget(self.background_edit, row, 1, 1, 3)
-        row += 1
-
-        grid.addWidget(QLabel("备注"), row, 0)
+        grid3.addWidget(self.background_edit, 2, 1, 1, 3)
+        grid3.addWidget(QLabel("备注"), 3, 0)
         self.notes_edit = QPlainTextEdit()
         self.notes_edit.setMaximumHeight(46)
-        grid.addWidget(self.notes_edit, row, 1, 1, 3)
-        row += 1
+        grid3.addWidget(self.notes_edit, 3, 1, 1, 3)
+        vsplit.addWidget(g3)
 
-        # 绑定自定义模块（如：势力/宗门/武器条目）
+        # ---------- 组4：绑定模块 / 物品 / 关系 ----------
+        g4 = QGroupBox("绑定模块 / 物品 / 关系")
+        g4.setStyleSheet(_gbox_qss)
+        grid4 = QGridLayout(g4)
+        grid4.setContentsMargins(12, 8, 8, 8)
+        grid4.setHorizontalSpacing(14)
+        grid4.setVerticalSpacing(6)
         bind_title = QLabel("绑定模块（来自其他标签页，如势力/宗门/武器…）")
         bind_title.setObjectName("mutedLabel")
-        grid.addWidget(bind_title, row, 0)
+        grid4.addWidget(bind_title, 0, 0)
         self._bind_combos: dict[str, QComboBox] = {}
         self.bind_form = QFormLayout()
         self.bind_form.setLabelAlignment(self.bind_form.labelAlignment())
         self.bind_container = QWidget()
         self.bind_container.setStyleSheet("QWidget{background:transparent;}")
         self.bind_container.setLayout(self.bind_form)
-        grid.addWidget(self.bind_container, row, 1, 1, 3)
-        row += 1
-
-        # 拥有的物品
+        grid4.addWidget(self.bind_container, 0, 1, 1, 3)
         items_title = QLabel("拥有的物品")
         items_title.setObjectName("mutedLabel")
-        grid.addWidget(items_title, row, 0)
+        grid4.addWidget(items_title, 1, 0)
         self.items_list = QListWidget()
         self.items_list.setMaximumHeight(60)
-        grid.addWidget(self.items_list, row, 1, 1, 3)
+        grid4.addWidget(self.items_list, 1, 1, 1, 3)
         items_row = QHBoxLayout()
         add_item_btn = QPushButton("➕ 添加物品")
         del_item_btn = QPushButton("－ 移除关联")
@@ -530,19 +550,16 @@ class CharacterTab(QWidget):
         del_item_btn.clicked.connect(self._del_item)
         items_row.addWidget(add_item_btn)
         items_row.addWidget(del_item_btn)
-        grid.addLayout(items_row, row + 1, 1, 1, 3)
-        row += 2
-
-        # 当前角色的关系（以本角色为中心，右键列表项可编辑/删除）
+        grid4.addLayout(items_row, 2, 1, 1, 3)
         rel_title = QLabel("🕸 当前角色关系（以本角色为中心，全部章节）")
         rel_title.setObjectName("mutedLabel")
-        grid.addWidget(rel_title, row, 0)
+        grid4.addWidget(rel_title, 3, 0)
         self.relations_list = QListWidget()
         self.relations_list.setMaximumHeight(96)
         self.relations_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.relations_list.customContextMenuRequested.connect(self._relation_menu)
         self.relations_list.itemDoubleClicked.connect(lambda _it: self._edit_relation())
-        grid.addWidget(self.relations_list, row, 1, 1, 3)
+        grid4.addWidget(self.relations_list, 3, 1, 1, 3)
         rel_row = QHBoxLayout()
         add_rel_btn = QPushButton("➕ 添加关系")
         edit_rel_btn = QPushButton("✏ 编辑")
@@ -556,8 +573,12 @@ class CharacterTab(QWidget):
         rel_row.addWidget(edit_rel_btn)
         rel_row.addWidget(del_rel_btn)
         rel_row.addWidget(graph_btn)
-        grid.addLayout(rel_row, row + 1, 1, 1, 3)
-        row += 2
+        grid4.addLayout(rel_row, 4, 1, 1, 3)
+        vsplit.addWidget(g4)
+
+        # 初始高度比例（之后可用 splitter 手柄自由拖动调整）
+        vsplit.setSizes([240, 210, 300, 260])
+        rv.addWidget(vsplit, 1)
 
         # 按钮行：功能按钮
         save_row = QHBoxLayout()
@@ -574,8 +595,7 @@ class CharacterTab(QWidget):
         for b in (add_btn, del_btn, template_btn, import_btn, export_btn):
             save_row.addWidget(b)
         save_row.addStretch(1)
-        grid.addLayout(save_row, row, 0, 1, 4)
-        row += 1
+        rv.addLayout(save_row)
 
         # 保存按钮：单独一行、加大加粗，突出显示
         big_save_row = QHBoxLayout()
@@ -588,7 +608,7 @@ class CharacterTab(QWidget):
         )
         big_save_btn.clicked.connect(self._save)
         big_save_row.addWidget(big_save_btn, 1)
-        grid.addLayout(big_save_row, row, 0, 1, 4)
+        rv.addLayout(big_save_row)
 
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 1)
@@ -1883,8 +1903,153 @@ class WorldSettingsTab(QWidget):
 # ======================================================================
 # 📑 大纲页：项目信息 + 主线大纲 + 起承转合
 # ======================================================================
+class _DraftChapterDialog(GradientDialog):
+    """根据大纲节点生成章节草稿：本地模板 或 AI 生成，预览后可另存为新章节。"""
+
+    def __init__(self, parent=None, node: "PlotNode | None" = None,
+                 on_save=None, ai_provider=None):
+        super().__init__("✍️ 生成章节草稿", parent, resizable=True)
+        self.node = node
+        self.on_save = on_save
+        self.ai_provider = ai_provider
+        self.setMinimumSize(560, 520)
+        body = self.body
+
+        info = QLabel(
+            f"📌 节点：{node.name if node else '（未选择）'}\n"
+            f"📍 章节：{node.chapter or '未定'}　|　冲突：{(node.conflict or '').strip()[:40]}…"
+            if node else "📌 未选择节点"
+        )
+        info.setObjectName("mutedLabel")
+        info.setWordWrap(True)
+        body.addWidget(info)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("生成方式"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["本地模板草稿", "AI 生成（需已配置 API）"])
+        row.addWidget(self.mode_combo)
+        row.addSpacing(12)
+        row.addWidget(QLabel("目标字数"))
+        self.words_spin = QSpinBox()
+        self.words_spin.setRange(500, 10000)
+        self.words_spin.setSingleStep(500)
+        self.words_spin.setValue(1500)
+        self.words_spin.setSuffix(" 字")
+        row.addWidget(self.words_spin)
+        row.addStretch(1)
+        body.addLayout(row)
+
+        self.preview = QPlainTextEdit()
+        self.preview.setPlaceholderText(
+            "点击「生成」得到草稿；可直接修改；满意后点「📥 另存为新章节」。"
+        )
+        body.addWidget(self.preview, 1)
+
+        btn_row = QHBoxLayout()
+        gen_btn = QPushButton("✨ 生成")
+        save_btn = QPushButton("📥 另存为新章节")
+        gen_btn.clicked.connect(self._generate)
+        save_btn.clicked.connect(self._save)
+        btn_row.addWidget(gen_btn)
+        btn_row.addWidget(save_btn)
+        btn_row.addStretch(1)
+        body.addLayout(btn_row)
+
+        self.status = QLabel("")
+        self.status.setObjectName("mutedLabel")
+        body.addWidget(self.status)
+        save_btn.setEnabled(False)
+        self._save_btn = save_btn
+        self.preview.textChanged.connect(
+            lambda: save_btn.setEnabled(bool(self.preview.toPlainText().strip())))
+
+    def _generate(self):
+        node = self.node
+        if node is None:
+            self.status.setText("请先选择一个大纲节点")
+            return
+        if self.mode_combo.currentIndex() == 1:
+            if self.ai_provider is None:
+                self.status.setText("❌ AI 未可用：请先在「设置 → API」配置，或在主窗口打开此对话框")
+                return
+            self.status.setText("⏳ AI 生成中…")
+            self._save_btn.setEnabled(False)
+            self.ai_provider(self._ai_prompt(node), lambda text, err: self._ai_done(text, err))
+        else:
+            self.preview.setPlainText(template_draft(node))
+            self.status.setText("✅ 模板草稿已生成，可编辑后另存")
+
+    def _ai_prompt(self, node) -> str:
+        return (
+            "你是一位中文网络小说作家。请根据以下大纲节点，生成一章完整的章节正文草稿。\n"
+            f"【节点】{node.name}（发生在 {node.chapter or '未定章节'}）\n"
+            f"【冲突】{node.conflict or ''}\n"
+            f"【伏笔】{node.foreshadow or ''}\n"
+            f"【要求】约 {int(self.words_spin.value())} 字；完整正文，自然分段，"
+            "节奏符合网络小说习惯；结尾留一个悬念或转折钩子，便于衔接下一节点。"
+            "只输出正文，不要标题与解释。"
+        )
+
+    def _ai_done(self, text, err):
+        if err:
+            self.status.setText(f"❌ {err}")
+            return
+        self.preview.setPlainText((text or "").strip())
+        self.status.setText("✅ AI 草稿已生成，可编辑后另存")
+
+    def _save(self):
+        text = self.preview.toPlainText().strip()
+        if not text:
+            return
+        if self.on_save:
+            self.on_save(self.node, text, self._saved)
+        else:
+            self._saved(None)
+
+    def _saved(self, err):
+        if err:
+            self.status.setText(f"❌ {err}")
+        else:
+            self.status.setText("✅ 已另存为新章节")
+
+
+def template_draft(node) -> str:
+    """根据大纲节点生成本地模板草稿（结构化框架，供作者填充润色）。"""
+    name = node.name or "未命名节点"
+    chapter = node.chapter or "未定章节"
+    conflict = (node.conflict or "").strip()
+    foreshadow = [f.strip() for f in (node.foreshadow or "").splitlines() if f.strip()]
+    lines = [
+        f"　　【本章草稿 · {name}】（发生在 {chapter}）",
+        "",
+        "　　【冲突展开】",
+    ]
+    if conflict:
+        lines.append(f"　　围绕「{conflict}」，双方正面交锋：")
+        lines.append("　　　· 动作/场景：……（补写）")
+        lines.append("　　　· 对话交锋：……（补写）")
+        lines.append("　　　· 内心转折：……（补写）")
+    else:
+        lines.append("　　　· 冲突核心：……（补写）")
+    lines.append("")
+    lines.append("　　【伏笔铺设】")
+    if foreshadow:
+        for f in foreshadow:
+            lines.append(f"　　　· 不经意带出：{f}（埋线，勿点破）")
+    else:
+        lines.append("　　　· 埋一个线索：……（可留白）")
+    lines.append("")
+    lines.append("　　【结尾钩子】")
+    lines.append("　　　· 悬念/转折：……（引向下一个节点）")
+    lines.append("")
+    lines.append("　　——以上为草稿框架，正文请按需扩写——")
+    return "\n".join(lines)
+
+
 class PlotOutlineTab(QWidget):
     STAGES = ["（无）", "起", "承", "转", "合"]
+    draft_saved = Signal()   # 由大纲节点生成的新章节已保存（主窗口据此刷新章节树）
 
     def __init__(self, storage, parent=None):
         super().__init__(parent)
@@ -1958,12 +2123,16 @@ class PlotOutlineTab(QWidget):
         save_node.clicked.connect(self._save_node)
         node_add = QPushButton("➕ 新增")
         node_del = QPushButton("🗑 删除")
+        draft_btn = QPushButton("✍️ 生成章节草稿")
+        draft_btn.setToolTip("根据当前大纲节点（冲突/伏笔）生成本章草稿：本地模板或 AI 生成")
         node_add.clicked.connect(self._add_node)
         node_del.clicked.connect(self._delete_node)
+        draft_btn.clicked.connect(self._open_draft_dialog)
         node_row = QHBoxLayout()
         node_row.addWidget(save_node)
         node_row.addWidget(node_add)
         node_row.addWidget(node_del)
+        node_row.addWidget(draft_btn)
         form.addRow("", node_row)
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 1)
@@ -2058,6 +2227,42 @@ class PlotOutlineTab(QWidget):
     def _add_node(self):
         self._clear_node()
         self.node_name_edit.setFocus()
+
+    # ---------- 生成章节草稿 ----------
+    def _open_draft_dialog(self):
+        node = None
+        if self._current_id is not None:
+            node = self.storage.get_plot_node(self._current_id)
+        if node is None:
+            QMessageBox.information(
+                self, "生成章节草稿", "请先选择（或新建并保存）一个大纲节点。")
+            return
+        dlg = _DraftChapterDialog(
+            self,
+            node=node,
+            on_save=self._save_draft,
+            ai_provider=getattr(self, "ai_provider", None),
+        )
+        dlg.exec()
+
+    def _save_draft(self, node, text: str, done_cb):
+        """把草稿另存为新章节，并通知主窗口刷新章节树。"""
+        try:
+            book_id = self.storage.get_book().id
+            from ..editor import count_words
+            ch = Chapter(
+                book_id=book_id,
+                title=node.name or "未命名",
+                content=text,
+                word_count=count_words(text)["total"],
+                status="草稿",
+            )
+            ch.id = self.storage.add_chapter(ch)
+            self.reload()
+            self.draft_saved.emit()
+            done_cb(None)
+        except Exception as e:  # noqa: BLE001
+            done_cb(str(e))
 
     def _save_node(self):
         from ..models import PlotNode
