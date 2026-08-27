@@ -271,3 +271,67 @@ class TimelineEvent:
     result: str = ""               # 结果/影响
     order: int = 0
     created_at: str = field(default_factory=_now)
+
+
+@dataclass
+class StorylineLine:
+    """剧情线（感情线/事业线/成长线…）：一条线。"""
+    id: int = 0
+    book_id: int = 0
+    name: str = ""                 # 线名（如：感情线）
+    note: str = ""                 # 说明
+    order: int = 0
+    created_at: str = field(default_factory=_now)
+
+
+@dataclass
+class StorylineNode:
+    """剧情线上的一个节点（阶段/事件）。"""
+    id: int = 0
+    book_id: int = 0
+    line_id: int = 0
+    title: str = ""                # 节点名（如：初次心动）
+    chapter: str = ""              # 发生章节
+    detail: str = ""               # 说明
+    order: int = 0
+    created_at: str = field(default_factory=_now)
+
+
+@dataclass
+class TechNode:
+    """科技树节点（科幻）：技术/能力及其前置依赖。"""
+    id: int = 0
+    book_id: int = 0
+    name: str = ""                 # 技术名
+    level: str = ""                # 等级/阶段
+    deps: str = ""                 # 前置技术（逗号分隔）
+    description: str = ""          # 说明
+    order: int = 0
+    created_at: str = field(default_factory=_now)
+
+
+@dataclass
+class CaseCard:
+    """悬疑案件卡：案件 / 线索 / 反转 / 真相。"""
+    id: int = 0
+    book_id: int = 0
+    name: str = ""                 # 案件名
+    clues: str = ""                # 线索（每行一条）
+    twist: str = ""                # 反转
+    truth: str = ""                # 真相
+    status: str = "未破"           # 未破 / 侦办中 / 已破
+    foreshadows: str = ""          # 关联伏笔（逗号分隔）
+    created_at: str = field(default_factory=_now)
+
+
+@dataclass
+class ChronicleEvent:
+    """编年史（历史）：年代/朝代 × 事件。"""
+    id: int = 0
+    book_id: int = 0
+    era: str = ""                  # 朝代/年代（如：唐 贞观年间）
+    title: str = ""                # 事件名
+    year: str = ""                 # 年份/序号（如：贞观二年）
+    detail: str = ""               # 说明
+    order: int = 0
+    created_at: str = field(default_factory=_now)

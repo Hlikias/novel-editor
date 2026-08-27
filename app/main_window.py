@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QDialog, QDialogButtonBox, QDockWidget,
     QFileDialog, QFormLayout, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QListWidget, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QPushButton,
-    QStackedWidget, QTabWidget, QTreeWidget, QTreeWidgetItem, QComboBox,
+    QSizePolicy, QStackedWidget, QTabWidget, QTreeWidget, QTreeWidgetItem, QComboBox,
     QVBoxLayout, QWidget, QStyle,
 )
 
@@ -496,7 +496,7 @@ class MainWindow(QMainWindow):
         project_menu.addSeparator()
         self._add_action(project_menu, "🗂 章节管理…", self.show_chapter_dialog, "Ctrl+Shift+C", None)
         self._add_action(project_menu, "👥 大纲 / 世界观 / 角色管理…", lambda: self.show_character_dialog(2), "Ctrl+Shift+R", None)
-        self._add_action(project_menu, "📐 创作规划（伏笔/章节卡片/力量体系/弧光/时间线）", self._show_planning_dialog, None, None)
+        self._add_action(project_menu, "📐 创作规划（伏笔/章节卡片/体系/剧情线/时间线）", lambda: self._show_planning_dialog(True), "Ctrl+Shift+P", None)
         project_menu.addSeparator()
         self._add_action(project_menu, "📊 统计视图", self.show_stats_view, None, None)
         self._add_action(project_menu, "🕵️ 错别字/违禁词检查", lambda: self._activate_bottom_tab(self.check_view), None, None)
@@ -669,7 +669,8 @@ class MainWindow(QMainWindow):
         self.tabs.setMovable(True)
         self.tabs.setDocumentMode(True)
         self.tabs.tabCloseRequested.connect(self._close_tab)
-        self.tabs.currentChanged.connect(lambda _i: (self._update_status(), self._update_preview()))
+        self.tabs.currentChanged.connect(lambda _i: (self._update_status(), self._update_preview(),
+                                                     self._refresh_snap()))
         self.tabs.tabBarDoubleClicked.connect(self._rename_tab_chapter)   # 双击 tab 重命名章节
 
         # 编辑器页 = 顶部格式工具栏 + 标签页
@@ -1198,6 +1199,7 @@ class MainWindow(QMainWindow):
         self.chapter_dock.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         )
+        self.chapter_dock.setMinimumSize(100, 0)   # 左侧 dock 可拉得很窄
         dock_widget = QWidget()
         dock_widget.setObjectName("chapterDockBody")
         layout = QVBoxLayout(dock_widget)
@@ -1226,6 +1228,7 @@ class MainWindow(QMainWindow):
         # ---- 右侧：AI 面板 ----
         self.ai_dock = QDockWidget("AI 写作助手", self)
         self.ai_dock.setObjectName("ai_dock")
+        self.ai_dock.setMinimumSize(160, 0)   # 右侧 dock 可拉得更窄
         self.ai_panel = AIPanel(self.config)
         self.ai_panel.current_editor_provider = self.current_editor
         self.ai_dock.setWidget(self.ai_panel)
@@ -1303,12 +1306,21 @@ class MainWindow(QMainWindow):
         self.bottom_tabs.addTab(self.time_view, "⏱ 写作时间")
 
         self.log_dock.setWidget(self.bottom_tabs)
-        self.log_dock.setMinimumHeight(150)   # 日志区不会缩得太矮
+        self.bottom_tabs.setMinimumSize(0, 0)     # 底部标签可拉得很矮
+        # 让底部各 tab 内容允许被压矮（否则 QTabWidget 的最小高度被内容顶住）
+        for i in range(self.bottom_tabs.count()):
+            w = self.bottom_tabs.widget(i)
+            w.setMinimumSize(0, 0)
+            sp = w.sizePolicy()
+            sp.setVerticalPolicy(QSizePolicy.Policy.Ignored)
+            w.setSizePolicy(sp)
+        self.log_dock.setMinimumHeight(60)        # 日志区最低高度（可再拉矮）
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
 
         # ---- 底部：全文搜索 ----
         self.search_dock = QDockWidget("🔍 全文搜索", self)
         self.search_dock.setObjectName("search_dock")
+        self.search_dock.setMinimumHeight(60)   # 底部 dock 可拉矮
         self.search_view = SearchView()
         self.search_view.open_requested.connect(self.open_chapter)
         self.search_dock.setWidget(self.search_view)
@@ -1332,6 +1344,7 @@ class MainWindow(QMainWindow):
         # ---- 左侧：项目设定总览（与章节/大纲叠） ----
         self.overview_dock = QDockWidget("📚 项目设定总览", self)
         self.overview_dock.setObjectName("overview_dock")
+        self.overview_dock.setMinimumSize(100, 0)
         self.overview_view = SettingsOverview()
         self.overview_dock.setWidget(self.overview_view)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.overview_dock)
@@ -1340,6 +1353,7 @@ class MainWindow(QMainWindow):
         # ---- 左侧：预览 ----
         self.preview_dock = QDockWidget("📖 预览", self)
         self.preview_dock.setObjectName("preview_dock")
+        self.preview_dock.setMinimumSize(100, 0)
         self.preview_view = PreviewDock()
         self.preview_view.html_provider = self._current_editor_html
         self.preview_dock.setWidget(self.preview_view)
@@ -1350,15 +1364,40 @@ class MainWindow(QMainWindow):
         self.quote_dock = QDockWidget("🀄 成语 / 金句 / 歇后语", self)
         # objectName 带 _r 后缀：旧的底部布局记忆不再匹配，默认落在右侧
         self.quote_dock.setObjectName("quote_dock_r")
+        self.quote_dock.setMinimumSize(160, 0)
         self.quote_view = QuoteDock()
         self.quote_dock.setWidget(self.quote_view)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.quote_dock)
         self.tabifyDockWidget(self.ai_dock, self.quote_dock)
         self.ai_dock.raise_()
 
+        # ---- 本章速览（边写边看：卡片/伏笔/剧情线/人物） ----
+        from .chapter_snap import ChapterSnapFloat, ChapterSnapPanel
+        self.snap_dock = QDockWidget("📋 本章速览", self)
+        self.snap_dock.setObjectName("snap_dock")
+        self.snap_dock.setMinimumSize(160, 0)
+        self.snap_panel = ChapterSnapPanel()
+        self.snap_dock.setWidget(self.snap_panel)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.snap_dock)
+        self.tabifyDockWidget(self.ai_dock, self.snap_dock)
+        self.snap_float = ChapterSnapFloat(self)
+        self.snap_dock.hide()   # 默认收起，菜单/快捷键唤出
+
         # 启动时应用已保存的简洁模式（所有 dock 与格式栏已就绪）
         if self.config.get("app", {}).get("simple_mode", False):
             self.simple_mode_action.setChecked(True)
+
+        # 让左右侧 dock 可拉得更窄（忽略内容的最小宽度建议，太窄时内容自动出滚动条）
+        for d in (self.chapter_dock, self.outline_dock, self.overview_dock,
+                  self.preview_dock, self.ai_dock, self.stats_dock,
+                  self.notes_dock, self.quote_dock, self.search_dock,
+                  self.snap_dock):
+            c = d.widget()
+            if c is not None:
+                c.setMinimumSize(0, 0)
+                sp = c.sizePolicy()
+                sp.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+                c.setSizePolicy(sp)
 
         # 视图菜单：切换 dock + 专注模式
         self.view_menu = QMenu("视图(&V)", self)
@@ -1387,6 +1426,8 @@ class MainWindow(QMainWindow):
         self.focus_action.setCheckable(True)
         self.focus_action.toggled.connect(self._toggle_focus_mode)
         view_menu.addAction(self.focus_action)
+        view_menu.addAction("📋 本章速览", lambda: (self.snap_dock.show(), self.snap_dock.raise_()))
+        view_menu.addAction("🪟 速览悬浮窗", self._toggle_snap_float)
 
         # 顶栏：菜单 + 窗口控制按钮（替代系统标题栏/菜单栏）
         self.title_bar = TitleBar(self, menus=self._menus)
@@ -1939,6 +1980,7 @@ class MainWindow(QMainWindow):
         self.tabs.setTabToolTip(idx, f"{ch.subtitle}\n{ch.summary}")
         self.tabs.setCurrentIndex(idx)
         self._update_status()
+        self._refresh_snap()
 
     def _new_editor(self, chapter_id: int | None) -> EditorWidget:
         editor = EditorWidget(self.config)
@@ -2351,8 +2393,37 @@ class MainWindow(QMainWindow):
         """大纲草稿的 AI 生成入口。"""
         self.ai_panel.run_task(prompt, done_cb, stream=False)
 
-    def _show_planning_dialog(self):
-        """打开「📐 创作规划」弹窗（单例，复用上次尺寸/位置）。"""
+    def _toggle_snap_float(self):
+        if hasattr(self, "snap_float"):
+            self._refresh_snap()
+            if self.snap_float.isVisible():
+                self.snap_float.hide()
+            else:
+                self.snap_float.show()
+                self.snap_float.raise_()
+
+    def _refresh_snap(self):
+        """刷新「本章速览」面板与悬浮窗（跟随当前章节）。"""
+        if not hasattr(self, "snap_panel"):
+            return
+        cid = 0
+        title = ""
+        editor = self.current_editor()
+        if editor is not None:
+            cid = getattr(editor, "chapter_id", None) or 0
+            if cid:
+                try:
+                    ch = self.storage.get_chapter(cid)
+                    title = ch.title if ch else ""
+                except Exception:  # noqa: BLE001
+                    pass
+        self.snap_panel.refresh(self.storage, cid, title)
+        if hasattr(self, "snap_float") and self.snap_float.isVisible():
+            self.snap_float.refresh(self.storage, cid, title)
+
+    def _show_planning_dialog(self, focus_chapter: bool = True):
+        """打开「📐 创作规划」弹窗（单例，复用上次尺寸/位置）。
+        focus_chapter=True（快捷键直达）时定位到当前章节并跳到卡片 tab。"""
         if self.storage is None:
             QMessageBox.information(self, "创作规划", "请先新建或打开一个项目。")
             return
@@ -2362,6 +2433,18 @@ class MainWindow(QMainWindow):
         else:
             self._planning_dialog.set_storage(self.storage)
             self._planning_dialog.reload()
+        if focus_chapter:
+            cid = 0
+            title = ""
+            editor = self.current_editor()
+            if editor is not None:
+                cid = getattr(editor, "chapter_id", None) or 0
+                try:
+                    ch = self.storage.get_chapter(cid) if cid else None
+                    title = ch.title if ch else ""
+                except Exception:  # noqa: BLE001
+                    pass
+            self._planning_dialog.focus_current_chapter(cid, title)
         self._planning_dialog.show()
         self._planning_dialog.raise_()
         self._planning_dialog.activateWindow()

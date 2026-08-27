@@ -69,10 +69,10 @@ assert wv2.custom_fields.get("战力等级") == "斗者→斗师→大斗师"
 assert "修真境界" not in wv2.custom_fields, "切换种类后旧种类字段应清空"
 print("3) 切换种类字段 OK:", wv2.custom_fields)
 
-# 4) 都市：无种类特有字段（只留一行空行供用户添加）
+# 4) 都市：应有都市特有字段（时代背景/城市设定/社会势力）
 wvt.genre_combo.setCurrentText("都市")
-assert all(r["label"].text().strip() == "" for r in wvt._field_rows), "都市不应有命名特有字段"
-print("4) 都市无特有字段 OK")
+assert field_labels(wvt) == {"时代背景", "城市设定", "社会势力"}, field_labels(wvt)
+print("4) 都市特有字段 OK")
 
 dlg.close()
 print("WORLDVIEW UNIQUE OK")

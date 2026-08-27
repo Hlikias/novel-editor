@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """离线冒烟测试：验证主窗口、存储、各弹窗、控制台。"""
 import os
 import sys
@@ -162,7 +162,7 @@ wvt.name_edit.setText("九州修真界·改")
 wvt._save()
 assert len(st.list_worldviews()) == 1, "再次保存应更新而非新增"
 wvt.genre_combo.setCurrentText("都市")
-assert not [r for r in wvt._field_rows if r["label"].text()], "都市不应有种类特有字段"
+assert "城市设定" in [r["label"].text() for r in wvt._field_rows], "都市应有专属字段"
 print("世界观唯一/种类字段 OK")
 
 sdlg = SettingsDialog(win.config, parent=win)

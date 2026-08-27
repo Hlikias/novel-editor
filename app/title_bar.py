@@ -140,7 +140,10 @@ class WindowResizer(QObject):
 
     def _on_destroyed(self):
         """窗口销毁时移除全局过滤器，避免引用已删除对象。"""
-        self._alive = False
+        try:
+            self._alive = False
+        except Exception:  # noqa: BLE001
+            pass
         try:
             QApplication.instance().removeEventFilter(self)
         except Exception:  # noqa: BLE001
@@ -199,12 +202,17 @@ class WindowResizer(QObject):
             return False
 
     def eventFilter(self, obj, ev):
-        if not self._alive or not self._window_valid():
-            return False
+        # 整个逻辑包进 try：应用退出/窗口销毁的收尾时序里，Python 属性可能已
+        # 被清理（getattr 防御），任何异常都熔断并摘除过滤器，绝不抛给 Qt。
         try:
+            if not getattr(self, "_alive", False) or not self._window_valid():
+                return False
             return self._handle(obj, ev)
-        except Exception:  # noqa: BLE001  （含 SystemError：窗口销毁期访问已删对象）
-            self._alive = False   # 熔断：之后不再处理，避免 Qt 反复刷屏
+        except Exception:  # noqa: BLE001  （含 SystemError/AttributeError：销毁期对象已部分回收）
+            try:
+                self._alive = False
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 QApplication.instance().removeEventFilter(self)
             except Exception:  # noqa: BLE001

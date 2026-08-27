@@ -8,9 +8,10 @@ import sqlite3
 from typing import List, Optional
 
 from .models import (
-    AttributeItem, Book, Bookmark, Chapter, ChapterCard, Character,
-    CharacterArc, Foreshadow, ModuleDef, ModuleEntry, Note, NovelMap, PlotNode,
-    PowerLevel, Relation, TimelineEvent, Weapon, WorldSetting, Worldview,
+    AttributeItem, Book, Bookmark, CaseCard, Chapter, ChapterCard, Character,
+    CharacterArc, ChronicleEvent, Foreshadow, ModuleDef, ModuleEntry, Note,
+    NovelMap, PlotNode, PowerLevel, Relation, StorylineLine, StorylineNode,
+    TechNode, TimelineEvent, Weapon, WorldSetting, Worldview,
 )
 
 SCHEMA = """
@@ -142,6 +143,55 @@ CREATE TABLE IF NOT EXISTS timeline_events (
     chapter TEXT DEFAULT '',
     characters TEXT DEFAULT '',
     result TEXT DEFAULT '',
+    "order" INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS storyline_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL,
+    name TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    "order" INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS storyline_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL,
+    line_id INTEGER DEFAULT 0,
+    title TEXT DEFAULT '',
+    chapter TEXT DEFAULT '',
+    detail TEXT DEFAULT '',
+    "order" INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS tech_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL,
+    name TEXT DEFAULT '',
+    level TEXT DEFAULT '',
+    deps TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    "order" INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS cases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL,
+    name TEXT DEFAULT '',
+    clues TEXT DEFAULT '',
+    twist TEXT DEFAULT '',
+    truth TEXT DEFAULT '',
+    status TEXT DEFAULT '未破',
+    foreshadows TEXT DEFAULT '',
+    created_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS chronicle_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL,
+    era TEXT DEFAULT '',
+    title TEXT DEFAULT '',
+    year TEXT DEFAULT '',
+    detail TEXT DEFAULT '',
     "order" INTEGER DEFAULT 0,
     created_at TEXT DEFAULT ''
 );
@@ -973,6 +1023,157 @@ class Storage:
     def max_timeline_order(self) -> int:
         row = self.conn.execute(
             "SELECT COALESCE(MAX(\"order\"), 0) AS m FROM timeline_events").fetchone()
+        return int(row["m"])
+
+    # ---------- 剧情线（多线节点，通用） ----------
+    def list_storyline_lines(self) -> List[StorylineLine]:
+        rows = self.conn.execute(
+            "SELECT * FROM storyline_lines ORDER BY \"order\" ASC, id ASC").fetchall()
+        return [StorylineLine(**dict(r)) for r in rows]
+
+    def add_storyline_line(self, line: StorylineLine) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO storyline_lines (book_id, name, note, \"order\", created_at)"
+            " VALUES (?,?,?,?,?)",
+            (line.book_id, line.name, line.note, line.order, line.created_at),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_storyline_line(self, line: StorylineLine) -> None:
+        self.conn.execute(
+            "UPDATE storyline_lines SET name=?, note=?, \"order\"=? WHERE id=?",
+            (line.name, line.note, line.order, line.id),
+        )
+        self.conn.commit()
+
+    def delete_storyline_line(self, lid: int) -> None:
+        self.conn.execute("DELETE FROM storyline_lines WHERE id=?", (lid,))
+        self.conn.execute("DELETE FROM storyline_nodes WHERE line_id=?", (lid,))
+        self.conn.commit()
+
+    def list_storyline_nodes(self, line_id: int = 0) -> List[StorylineNode]:
+        if line_id:
+            rows = self.conn.execute(
+                "SELECT * FROM storyline_nodes WHERE line_id=? ORDER BY \"order\" ASC, id ASC",
+                (line_id,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM storyline_nodes ORDER BY \"order\" ASC, id ASC").fetchall()
+        return [StorylineNode(**dict(r)) for r in rows]
+
+    def add_storyline_node(self, n: StorylineNode) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO storyline_nodes (book_id, line_id, title, chapter, detail, \"order\", created_at)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (n.book_id, n.line_id, n.title, n.chapter, n.detail, n.order, n.created_at),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_storyline_node(self, n: StorylineNode) -> None:
+        self.conn.execute(
+            "UPDATE storyline_nodes SET line_id=?, title=?, chapter=?, detail=?, \"order\"=? WHERE id=?",
+            (n.line_id, n.title, n.chapter, n.detail, n.order, n.id),
+        )
+        self.conn.commit()
+
+    def delete_storyline_node(self, nid: int) -> None:
+        self.conn.execute("DELETE FROM storyline_nodes WHERE id=?", (nid,))
+        self.conn.commit()
+
+    def max_storyline_node_order(self, line_id: int) -> int:
+        row = self.conn.execute(
+            "SELECT COALESCE(MAX(\"order\"), 0) AS m FROM storyline_nodes WHERE line_id=?",
+            (line_id,),
+        ).fetchone()
+        return int(row["m"])
+
+    # ---------- 科技树（科幻） ----------
+    def list_tech_nodes(self) -> List[TechNode]:
+        rows = self.conn.execute(
+            "SELECT * FROM tech_nodes ORDER BY \"order\" ASC, id ASC").fetchall()
+        return [TechNode(**dict(r)) for r in rows]
+
+    def add_tech_node(self, t: TechNode) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO tech_nodes (book_id, name, level, deps, description, \"order\", created_at)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (t.book_id, t.name, t.level, t.deps, t.description, t.order, t.created_at),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_tech_node(self, t: TechNode) -> None:
+        self.conn.execute(
+            "UPDATE tech_nodes SET name=?, level=?, deps=?, description=?, \"order\"=? WHERE id=?",
+            (t.name, t.level, t.deps, t.description, t.order, t.id),
+        )
+        self.conn.commit()
+
+    def delete_tech_node(self, tid: int) -> None:
+        self.conn.execute("DELETE FROM tech_nodes WHERE id=?", (tid,))
+        self.conn.commit()
+
+    # ---------- 悬疑案件 ----------
+    def list_cases(self) -> List[CaseCard]:
+        rows = self.conn.execute("SELECT * FROM cases ORDER BY id ASC").fetchall()
+        return [CaseCard(**dict(r)) for r in rows]
+
+    def get_case(self, cid: int) -> Optional[CaseCard]:
+        row = self.conn.execute("SELECT * FROM cases WHERE id=?", (cid,)).fetchone()
+        return CaseCard(**dict(row)) if row else None
+
+    def add_case(self, c: CaseCard) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO cases (book_id, name, clues, twist, truth, status, foreshadows, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (c.book_id, c.name, c.clues, c.twist, c.truth, c.status, c.foreshadows, c.created_at),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_case(self, c: CaseCard) -> None:
+        self.conn.execute(
+            "UPDATE cases SET name=?, clues=?, twist=?, truth=?, status=?, foreshadows=? WHERE id=?",
+            (c.name, c.clues, c.twist, c.truth, c.status, c.foreshadows, c.id),
+        )
+        self.conn.commit()
+
+    def delete_case(self, cid: int) -> None:
+        self.conn.execute("DELETE FROM cases WHERE id=?", (cid,))
+        self.conn.commit()
+
+    # ---------- 编年史（历史） ----------
+    def list_chronicle_events(self) -> List[ChronicleEvent]:
+        rows = self.conn.execute(
+            "SELECT * FROM chronicle_events ORDER BY \"order\" ASC, id ASC").fetchall()
+        return [ChronicleEvent(**dict(r)) for r in rows]
+
+    def add_chronicle_event(self, e: ChronicleEvent) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO chronicle_events (book_id, era, title, year, detail, \"order\", created_at)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (e.book_id, e.era, e.title, e.year, e.detail, e.order, e.created_at),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    def update_chronicle_event(self, e: ChronicleEvent) -> None:
+        self.conn.execute(
+            "UPDATE chronicle_events SET era=?, title=?, year=?, detail=?, \"order\"=? WHERE id=?",
+            (e.era, e.title, e.year, e.detail, e.order, e.id),
+        )
+        self.conn.commit()
+
+    def delete_chronicle_event(self, eid: int) -> None:
+        self.conn.execute("DELETE FROM chronicle_events WHERE id=?", (eid,))
+        self.conn.commit()
+
+    def max_chronicle_order(self) -> int:
+        row = self.conn.execute(
+            "SELECT COALESCE(MAX(\"order\"), 0) AS m FROM chronicle_events").fetchone()
         return int(row["m"])
 
     # ---------- 角色关系 ----------

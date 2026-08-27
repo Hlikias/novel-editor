@@ -21,7 +21,8 @@ _mw.save_config = lambda cfg: None
 
 from app.models import (
     Book, Chapter, Character, PlotNode, Foreshadow, ChapterCard,
-    PowerLevel, CharacterArc, TimelineEvent,
+    PowerLevel, CharacterArc, TimelineEvent, StorylineLine, StorylineNode,
+    TechNode, CaseCard, ChronicleEvent,
 )
 from app.storage import Storage
 from app.main_window import MainWindow
@@ -69,6 +70,22 @@ e2 = TimelineEvent(book_id=book.id, title="夺剑大会", order=2)
 e1.id = st.add_timeline_event(e1)
 e2.id = st.add_timeline_event(e2)
 assert len(st.list_timeline_events()) == 2
+
+# 新表 CRUD：剧情线/科技树/案件/编年史
+sl = StorylineLine(book_id=book.id, name="感情线", order=1)
+sl.id = st.add_storyline_line(sl)
+sn = StorylineNode(book_id=book.id, line_id=sl.id, title="初次心动", chapter="第 6 章", order=1)
+sn.id = st.add_storyline_node(sn)
+assert len(st.list_storyline_lines()) == 1 and len(st.list_storyline_nodes(sl.id)) == 1
+tn = TechNode(book_id=book.id, name="反重力引擎", deps="聚变反应堆", order=1)
+tn.id = st.add_tech_node(tn)
+assert st.list_tech_nodes()[0].name == "反重力引擎"
+cs = CaseCard(book_id=book.id, name="灭门案", truth="真凶是管家")
+cs.id = st.add_case(cs)
+assert st.get_case(cs.id).truth == "真凶是管家"
+ce = ChronicleEvent(book_id=book.id, era="唐", title="玄武门之变", order=1)
+ce.id = st.add_chronicle_event(ce)
+assert st.list_chronicle_events()[0].era == "唐"
 print("1) 存储 CRUD OK")
 
 # ---------- 弹窗（菜单入口打开） ----------
@@ -84,8 +101,82 @@ assert hasattr(win, "_planning_dialog")
 pd = win._planning_dialog
 assert isinstance(pd, PlanningDialog)
 assert pd.isVisible(), "创作规划应为弹窗"
-assert pd.tabs.count() == 6, pd.tabs.count()
-print("2) 弹窗 + 6 个 tab OK")
+
+# 按类型动态 tab：玄幻 → 通用4 + 体系等级 + 剧情线 + 类型模板
+def no_emoji(s: str) -> str:
+    return "".join(ch if ord(ch) < 128 else "?" for ch in s)
+
+tab_titles = [pd.tabs.tabText(i) for i in range(pd.tabs.count())]
+print("2) 玄幻 tab:", [no_emoji(t) for t in tab_titles])
+assert "⚔ 体系等级" in tab_titles and "📈 剧情线" in tab_titles and "🪝 伏笔" in tab_titles
+assert "🔬 科技树" not in tab_titles, "玄幻不应有科技树"
+
+# 切到科幻 → 增加科技树
+_b = st.get_book()
+_b.genre = "科幻"
+st.save_book(_b)
+pd.set_storage(st)
+tab_titles = [pd.tabs.tabText(i) for i in range(pd.tabs.count())]
+print("   科幻 tab:", [no_emoji(t) for t in tab_titles])
+assert "🔬 科技树" in tab_titles and "⚔ 体系等级" in tab_titles
+
+# 悬疑 → 案件线索；历史 → 编年史
+_b = st.get_book()
+_b.genre = "悬疑"
+st.save_book(_b)
+pd.set_storage(st)
+t2 = [pd.tabs.tabText(i) for i in range(pd.tabs.count())]
+assert "🕵 案件线索" in t2 and "⚔ 体系等级" not in t2 and "📈 剧情线" in t2
+_b = st.get_book()
+_b.genre = "历史"
+st.save_book(_b)
+pd.set_storage(st)
+t3 = [pd.tabs.tabText(i) for i in range(pd.tabs.count())]
+assert "📜 编年史" in t3
+# 言情 → 只有剧情线（无体系）
+_b = st.get_book()
+_b.genre = "言情"
+st.save_book(_b)
+pd.set_storage(st)
+t4 = [pd.tabs.tabText(i) for i in range(pd.tabs.count())]
+assert "📈 剧情线" in t4 and "⚔ 体系等级" not in t4 and "🗂 类型模板" in t4
+print("2) 按类型动态 tab OK")
+
+# 新 tab 功能：剧情线（线+节点）、科技树、案件、编年史
+sl_tab = pd.storyline_tab
+sl_tab._new_line()
+sl_tab.line_name_edit.setText("事业线")
+sl_tab._save_line()
+lines = st.list_storyline_lines()
+assert len(lines) == 2, lines
+sl_tab.node_title_edit.setText("成立宗门")
+sl_tab.node_chapter_edit.setText("第 10 章")
+sl_tab._save_node()
+# 保存线后回到第一条（感情线），节点保存在当前选中线
+assert len(st.list_storyline_nodes(sl_tab._current_line or 0)) >= 1
+assert any(n.title == "成立宗门" for n in st.list_storyline_nodes(sl_tab._current_line or 0))
+
+tt = pd.tech_tab
+tt._new()
+tt.name_edit.setText("曲率引擎")
+tt.deps_edit.setText("反重力引擎")
+tt._save()
+assert any(x.name == "曲率引擎" for x in st.list_tech_nodes())
+
+ct = pd.case_tab
+ct._new()
+ct.name_edit.setText("连环案")
+ct.truth_edit.setPlainText("真凶是苏浅浅")
+ct._save()
+assert st.list_cases()[-1].truth == "真凶是苏浅浅"
+
+hc = pd.chronicle_tab
+hc._new()
+hc.era_edit.setText("宋")
+hc.title_edit.setText("杯酒释兵权")
+hc._save()
+assert st.list_chronicle_events()[-1].era == "宋"
+print("3) 剧情线/科技树/案件/编年史 tab OK")
 
 # ---------- 伏笔 tab：保存 + 从大纲导入 ----------
 ft = pd.foreshadow_tab
@@ -167,9 +258,11 @@ print("7) 时间线 tab OK")
 # ---------- 类型模板 ----------
 tpl = pd.template_tab
 tpl.set_storage(st)
-assert "玄幻" in tpl.genre_combo.currentText()
+assert tpl.genre_combo.currentText() == "言情", tpl.genre_combo.currentText()   # 跟随当前项目类型
 assert tpl.view.toPlainText().strip()
-assert "玄幻" in TYPE_TEMPLATES
+assert "言情" in TYPE_TEMPLATES
+tpl.genre_combo.setCurrentText("悬疑")
+assert tpl.view.toPlainText().strip() and "线索" in tpl.view.toPlainText()
 print("8) 类型模板 OK")
 
 # ---------- 菜单入口 ----------

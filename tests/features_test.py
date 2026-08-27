@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """特性测试：金句/成语格式化、题材模板、按钮顺序、总览 dock。"""
 import os
 import sys
@@ -51,7 +51,8 @@ assert "修真境界" in labels(), labels()
 assert "核心法则" in labels()
 wvt._clear_form()
 wvt.genre_combo.setCurrentText("都市")
-assert [l for l in labels() if l] == [], labels()   # 无非空默认字段
+assert "城市设定" in labels(), labels()   # 都市也有专属默认字段
+assert "时代背景" in labels()
 wvt.genre_combo.setCurrentText("玄幻")
 assert "战力等级" in labels()
 # 用户自定义字段：添加一行并改名

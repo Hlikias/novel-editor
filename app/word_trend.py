@@ -63,7 +63,7 @@ class WordTrendView(QWidget):
     def __init__(self, tracker: DailyWordCountTracker, parent=None):
         super().__init__(parent)
         self._tracker = tracker
-        self.setMinimumHeight(150)
+        self.setMinimumHeight(60)   # 趋势图可压矮（底部日志区要能拉小）
         self.setObjectName("wordTrendView")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)

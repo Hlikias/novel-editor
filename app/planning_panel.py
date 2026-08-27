@@ -10,8 +10,10 @@ from PySide6.QtWidgets import (
 
 from .dialog_base import GradientDialog
 from .models import (
-    ChapterCard, CharacterArc, Foreshadow, PowerLevel, TimelineEvent,
+    CaseCard, ChapterCard, CharacterArc, ChronicleEvent, Foreshadow,
+    PowerLevel, StorylineLine, StorylineNode, TechNode, TimelineEvent,
 )
+from .chapter_snap import chapter_matches
 
 # 各小说类型的"前期工作方案"模板（模块 + 大纲结构建议）
 TYPE_TEMPLATES = {
@@ -80,6 +82,7 @@ class _BaseTab(QWidget):
         super().__init__(parent)
         self.storage = None
         self._current_id = None
+        self._filter_title = ""   # 章节过滤（按伏笔埋设/回收章节文本匹配）
         splitter = QSplitter(self)
         left = QWidget()
         lv = QVBoxLayout(left)
@@ -120,6 +123,11 @@ class _BaseTab(QWidget):
 
     def set_storage(self, storage):
         self.storage = storage
+        self.reload()
+
+    def set_chapter_filter(self, title: str):
+        """按章节标题过滤列表（空=全部）。"""
+        self._filter_title = (title or "").strip()
         self.reload()
 
     def _clear(self):
@@ -194,6 +202,10 @@ class ForeshadowTab(_BaseTab):
         self.list_widget.clear()
         if self.storage:
             for f in self.storage.list_foreshadows():
+                if self._filter_title and not (
+                        chapter_matches(f.plant_chapter, self._filter_title)
+                        or chapter_matches(f.harvest_chapter, self._filter_title)):
+                    continue
                 self.list_widget.addItem(
                     f"{f.name}（{f.status}）{('｜埋:' + f.plant_chapter) if f.plant_chapter else ''}")
                 self.list_widget.item(self.list_widget.count() - 1).setData(0x0100, f.id)
@@ -261,6 +273,16 @@ class ForeshadowTab(_BaseTab):
 
 # ---------- B. 章节大纲卡片 ----------
 class ChapterCardTab(_BaseTab):
+    _filter_cid = 0   # 章节过滤（按关联章节 id；0=全部）
+
+    def set_chapter_filter(self, cid_or_title):
+        """按关联章节过滤列表（0 或空=全部）。"""
+        try:
+            self._filter_cid = int(cid_or_title or 0)
+        except (TypeError, ValueError):
+            self._filter_cid = 0
+        self.reload()
+
     def _build_form(self):
         self.chapter_combo = QComboBox()
         self.form.addRow("关联章节", self.chapter_combo)
@@ -296,6 +318,8 @@ class ChapterCardTab(_BaseTab):
         self.list_widget.clear()
         if self.storage:
             for c in self.storage.list_chapter_cards():
+                if self._filter_cid and c.chapter_id != self._filter_cid:
+                    continue
                 self.list_widget.addItem(c.title or f"卡片 {c.id}")
                 self.list_widget.item(self.list_widget.count() - 1).setData(0x0100, c.id)
         self.list_widget.blockSignals(False)
@@ -355,12 +379,13 @@ class PowerLevelTab(_BaseTab):
         self.system_combo.setEditable(True)
         self.system_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.form.addRow("体系名", self.system_combo)
-        self.level_edit = _add_line(self.form, "等级名", "如：筑基 / 斗师 / 第 3 级")
+        self.level_edit = _add_line(self.form, "等级名", "如：筑基 / 斗师 / 第 3 级 / 觉醒期")
         self.stage_edit = _add_line(self.form, "阶段", "如：初期/中期/圆满（可空）")
-        self.desc_edit = _add_multi(self.form, "描述", "这一级的实力表现、特征…")
-        self.bt_edit = _add_multi(self.form, "突破条件", "如何升到下一级（资源/顿悟/仪式…）")
-        self.power_edit = _add_line(self.form, "战力对照", "可选，如：可开山裂石")
-        self.hint.setText("按体系分组（如炼气/筑基/金丹）；支持上移下移调整顺序。")
+        self.desc_edit = _add_multi(self.form, "描述", "这一级的实力/能力表现、特征…")
+        self.bt_edit = _add_multi(self.form, "升级条件", "如何升到下一级（资源/顿悟/考试/突破…）")
+        self.power_edit = _add_line(self.form, "能力对照", "可选，如：可开山裂石 / 可驾驶机甲")
+        self.hint.setText("通用体系表：修真境界、科技等级、魔法/职业体系等都能记；"
+                          "按体系分组，支持上移下移调整顺序。")
 
     def _fill_systems(self):
         self.system_combo.blockSignals(True)
@@ -624,6 +649,501 @@ class TimelineTab(_BaseTab):
         self.list_widget.setCurrentRow(j)
 
 
+# ---------- G. 剧情线（多线节点：感情/事业/成长…，所有类型通用） ----------
+class StorylineTab(QWidget):
+    """双级：线（感情线/事业线…）→ 节点（阶段/事件）。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.storage = None
+        self._current_line = None
+        self._current_node = None
+        self._filter_title = ""   # 章节过滤（节点按章节文本匹配）
+        outer = QVBoxLayout(self)
+        outer.setSpacing(6)
+
+        # 线管理
+        line_row = QHBoxLayout()
+        line_row.addWidget(QLabel("剧情线"))
+        self.line_combo = QComboBox()
+        self.line_combo.currentIndexChanged.connect(self._on_line_pick)
+        line_row.addWidget(self.line_combo, 1)
+        self.line_name_edit = QLineEdit()
+        self.line_name_edit.setPlaceholderText("线名，如：感情线 / 事业线 / 复仇线")
+        line_row.addWidget(self.line_name_edit, 2)
+        save_line = QPushButton("保存线")
+        new_line = QPushButton("➕ 新增线")
+        del_line = QPushButton("🗑 删线")
+        save_line.clicked.connect(self._save_line)
+        new_line.clicked.connect(self._new_line)
+        del_line.clicked.connect(self._delete_line)
+        line_row.addWidget(save_line)
+        line_row.addWidget(new_line)
+        line_row.addWidget(del_line)
+        outer.addLayout(line_row)
+
+        self.line_note_edit = QLineEdit()
+        self.line_note_edit.setPlaceholderText("线的说明（可选），如：男女主感情从误会到携手…")
+        outer.addWidget(self.line_note_edit)
+
+        # 节点列表 + 上移下移
+        node_head = QHBoxLayout()
+        node_head.addWidget(QLabel("线上节点（顺序排期）"))
+        node_head.addStretch(1)
+        up_btn = QPushButton("↑ 上移")
+        down_btn = QPushButton("↓ 下移")
+        up_btn.clicked.connect(lambda: self._swap_node(-1))
+        down_btn.clicked.connect(lambda: self._swap_node(1))
+        node_head.addWidget(up_btn)
+        node_head.addWidget(down_btn)
+        outer.addLayout(node_head)
+        self.node_list = QListWidget()
+        self.node_list.currentItemChanged.connect(lambda cur, _p: self._on_node_select(cur))
+        outer.addWidget(self.node_list, 1)
+
+        # 节点表单
+        nform = QHBoxLayout()
+        self.node_title_edit = QLineEdit()
+        self.node_title_edit.setPlaceholderText("节点名，如：初次心动")
+        self.node_chapter_edit = QLineEdit()
+        self.node_chapter_edit.setPlaceholderText("章节，如：第 8 章")
+        self.node_detail_edit = QLineEdit()
+        self.node_detail_edit.setPlaceholderText("说明（可选）")
+        nform.addWidget(self.node_title_edit, 2)
+        nform.addWidget(self.node_chapter_edit, 1)
+        nform.addWidget(self.node_detail_edit, 3)
+        outer.addLayout(nform)
+        nbtn = QHBoxLayout()
+        save_node = QPushButton("💾 保存节点")
+        new_node = QPushButton("➕ 新增节点")
+        del_node = QPushButton("🗑 删除节点")
+        save_node.clicked.connect(self._save_node)
+        new_node.clicked.connect(self._new_node)
+        del_node.clicked.connect(self._delete_node)
+        nbtn.addWidget(save_node)
+        nbtn.addWidget(new_node)
+        nbtn.addWidget(del_node)
+        nbtn.addStretch(1)
+        outer.addLayout(nbtn)
+
+        self.hint = QLabel("把故事的多条线索（感情/事业/成长…）各自排期，避免写着写着顾此失彼。")
+        self.hint.setObjectName("mutedLabel")
+        self.hint.setWordWrap(True)
+        outer.addWidget(self.hint)
+
+    def set_storage(self, storage):
+        self.storage = storage
+        self.reload()
+
+    def set_chapter_filter(self, title: str):
+        self._filter_title = (title or "").strip()
+        self.reload()
+
+    def reload(self):
+        self._reload_lines()
+        self._reload_nodes()
+
+    def _reload_lines(self):
+        self.line_combo.blockSignals(True)
+        self.line_combo.clear()
+        if self.storage:
+            for line in self.storage.list_storyline_lines():
+                self.line_combo.addItem(line.name or f"线 {line.id}", line.id)
+        self.line_combo.blockSignals(False)
+        self._current_line = None
+        self.line_name_edit.clear()
+        self.line_note_edit.clear()
+        if self.line_combo.count():
+            self.line_combo.setCurrentIndex(0)
+            self._on_line_pick(0)
+
+    def _on_line_pick(self, _idx):
+        lid = self.line_combo.currentData()
+        if lid and self.storage:
+            line = next((x for x in self.storage.list_storyline_lines() if x.id == lid), None)
+            if line:
+                self._current_line = line.id
+                self.line_name_edit.setText(line.name)
+                self.line_note_edit.setText(line.note)
+                self._reload_nodes()
+                return
+        self._current_line = None
+        self._reload_nodes()
+
+    def _save_line(self):
+        if not self.storage:
+            return
+        name = self.line_name_edit.text().strip()
+        if not name:
+            return
+        if self._current_line:
+            line = next((x for x in self.storage.list_storyline_lines()
+                         if x.id == self._current_line), None)
+            if line:
+                line.name = name
+                line.note = self.line_note_edit.text().strip()
+                self.storage.update_storyline_line(line)
+        else:
+            line = StorylineLine(
+                book_id=self.storage.get_book().id,
+                name=name, note=self.line_note_edit.text().strip(),
+                order=len(self.storage.list_storyline_lines()) + 1,
+            )
+            line.id = self.storage.add_storyline_line(line)
+        self._reload_lines()
+
+    def _new_line(self):
+        self._current_line = None
+        self.line_combo.setCurrentIndex(-1)
+        self.line_name_edit.clear()
+        self.line_note_edit.clear()
+        self.line_name_edit.setFocus()
+        self._reload_nodes()
+
+    def _delete_line(self):
+        if not self.storage or not self._current_line:
+            return
+        self.storage.delete_storyline_line(self._current_line)
+        self._reload_lines()
+
+    def _reload_nodes(self):
+        self.node_list.blockSignals(True)
+        self.node_list.clear()
+        if self.storage and self._current_line:
+            for n in self.storage.list_storyline_nodes(self._current_line):
+                if self._filter_title and not chapter_matches(n.chapter, self._filter_title):
+                    continue
+                self.node_list.addItem(
+                    f"{n.title}{('（' + n.chapter + '）') if n.chapter else ''}")
+                self.node_list.item(self.node_list.count() - 1).setData(0x0100, n.id)
+        self.node_list.blockSignals(False)
+        self._current_node = None
+        self.node_title_edit.clear()
+        self.node_chapter_edit.clear()
+        self.node_detail_edit.clear()
+        if self.node_list.count():
+            self.node_list.setCurrentRow(0)
+
+    def _on_node_select(self, item):
+        if item is None or not self.storage:
+            return
+        n = next((x for x in self.storage.list_storyline_nodes(self._current_line or 0)
+                  if x.id == item.data(0x0100)), None)
+        if n:
+            self._current_node = n.id
+            self.node_title_edit.setText(n.title)
+            self.node_chapter_edit.setText(n.chapter)
+            self.node_detail_edit.setText(n.detail)
+
+    def _save_node(self):
+        if not self.storage or not self._current_line:
+            return
+        n = StorylineNode(
+            id=self._current_node or 0,
+            book_id=self.storage.get_book().id,
+            line_id=self._current_line,
+            title=self.node_title_edit.text().strip(),
+            chapter=self.node_chapter_edit.text().strip(),
+            detail=self.node_detail_edit.text().strip(),
+            order=self._current_node or 0,
+        )
+        if n.id:
+            n.order = next((x.order for x in self.storage.list_storyline_nodes(n.line_id)
+                            if x.id == n.id), 0)
+            self.storage.update_storyline_node(n)
+        else:
+            n.order = self.storage.max_storyline_node_order(n.line_id) + 1
+            n.id = self.storage.add_storyline_node(n)
+        self._current_node = n.id
+        self._reload_nodes()
+
+    def _new_node(self):
+        self._current_node = None
+        self.node_title_edit.clear()
+        self.node_chapter_edit.clear()
+        self.node_detail_edit.clear()
+        self.node_title_edit.setFocus()
+
+    def _delete_node(self):
+        if not self.storage or not self._current_node:
+            return
+        self.storage.delete_storyline_node(self._current_node)
+        self._current_node = None
+        self._reload_nodes()
+
+    def _swap_node(self, delta: int):
+        if not self.storage or not self._current_line:
+            return
+        nodes = self.storage.list_storyline_nodes(self._current_line)
+        cur = next((i for i, x in enumerate(nodes) if x.id == self._current_node), None)
+        if cur is None:
+            return
+        j = cur + delta
+        if j < 0 or j >= len(nodes):
+            return
+        nodes[cur], nodes[j] = nodes[j], nodes[cur]
+        for i, x in enumerate(nodes):
+            x.order = i + 1
+            self.storage.update_storyline_node(x)
+        self._reload_nodes()
+        self.node_list.setCurrentRow(j)
+
+
+# ---------- H. 科技树（科幻） ----------
+class TechTreeTab(_BaseTab):
+    def _build_form(self):
+        self.name_edit = _add_line(self.form, "技术名", "如：反重力引擎 / 曲率航行")
+        self.level_edit = _add_line(self.form, "等级/阶段", "如：试验级 / 量产级")
+        self.deps_edit = _add_line(self.form, "前置技术", "逗号分隔，如：聚变反应堆, 材料学突破")
+        self.desc_edit = _add_multi(self.form, "说明", "技术原理、作用、限制…")
+        move_row = QHBoxLayout()
+        up_btn = QPushButton("↑ 上移")
+        down_btn = QPushButton("↓ 下移")
+        up_btn.clicked.connect(lambda: self._swap_order(-1))
+        down_btn.clicked.connect(lambda: self._swap_order(1))
+        move_row.addWidget(up_btn)
+        move_row.addWidget(down_btn)
+        self.form.addRow("", move_row)
+        self.hint.setText("科技树：记录技术与前置依赖，避免科幻设定出现硬伤。")
+
+    def _clear(self):
+        for e in (self.name_edit, self.level_edit, self.deps_edit):
+            e.clear()
+        self.desc_edit.clear()
+
+    def reload(self):
+        self.list_widget.blockSignals(True)
+        self.list_widget.clear()
+        if self.storage:
+            for t in self.storage.list_tech_nodes():
+                self.list_widget.addItem(
+                    f"{t.name}{('（' + t.level + '）') if t.level else ''}")
+                self.list_widget.item(self.list_widget.count() - 1).setData(0x0100, t.id)
+        self.list_widget.blockSignals(False)
+        if self.list_widget.count():
+            self.list_widget.setCurrentRow(0)
+        else:
+            self._clear()
+
+    def _on_select(self, item):
+        if item is None or not self.storage:
+            return
+        t = next((x for x in self.storage.list_tech_nodes() if x.id == item.data(0x0100)), None)
+        if t:
+            self._current_id = t.id
+            self.name_edit.setText(t.name)
+            self.level_edit.setText(t.level)
+            self.deps_edit.setText(t.deps)
+            self.desc_edit.setPlainText(t.description)
+
+    def _save(self):
+        if not self.storage:
+            return
+        t = TechNode(
+            id=self._current_id or 0,
+            book_id=self.storage.get_book().id,
+            name=self.name_edit.text().strip(),
+            level=self.level_edit.text().strip(),
+            deps=self.deps_edit.text().strip(),
+            description=self.desc_edit.toPlainText().strip(),
+            order=self._current_id or 0,
+        )
+        if t.id:
+            t.order = next((x.order for x in self.storage.list_tech_nodes()
+                            if x.id == t.id), 0)
+            self.storage.update_tech_node(t)
+        else:
+            existing = self.storage.list_tech_nodes()
+            t.order = max([x.order for x in existing], default=0) + 1
+            t.id = self.storage.add_tech_node(t)
+        self._current_id = t.id
+        self.reload()
+
+    def _do_delete(self, rid):
+        self.storage.delete_tech_node(rid)
+
+    def _swap_order(self, delta: int):
+        if not self.storage:
+            return
+        nodes = self.storage.list_tech_nodes()
+        cur = next((i for i, x in enumerate(nodes) if x.id == self._current_id), None)
+        if cur is None:
+            return
+        j = cur + delta
+        if j < 0 or j >= len(nodes):
+            return
+        nodes[cur], nodes[j] = nodes[j], nodes[cur]
+        for i, x in enumerate(nodes):
+            x.order = i + 1
+            self.storage.update_tech_node(x)
+        self.reload()
+        self.list_widget.setCurrentRow(j)
+
+
+# ---------- I. 悬疑案件线索表 ----------
+class CaseTab(_BaseTab):
+    def _build_form(self):
+        self.name_edit = _add_line(self.form, "案件名", "如：青云山灭门案")
+        self.clues_edit = _add_multi(self.form, "线索（每行一条）", "读者看到的线索、物证、口供…")
+        self.twist_edit = _add_multi(self.form, "反转", "中间的反转/误导/伪凶…")
+        self.truth_edit = _add_multi(self.form, "真相", "真正的凶手与动机（反推法先定真相）")
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(["未破", "侦办中", "已破"])
+        self.form.addRow("状态", self.status_combo)
+        self.fs_edit = _add_line(self.form, "关联伏笔", "逗号分隔，对应伏笔追踪表里的名称")
+        self.hint.setText("悬疑刚需：每个案件一张卡，线索分布与反转闭环；先定真相再埋线索。")
+
+    def _clear(self):
+        self.name_edit.clear()
+        for e in (self.clues_edit, self.twist_edit, self.truth_edit):
+            e.clear()
+        self.status_combo.setCurrentIndex(0)
+        self.fs_edit.clear()
+
+    def reload(self):
+        self.list_widget.blockSignals(True)
+        self.list_widget.clear()
+        if self.storage:
+            for c in self.storage.list_cases():
+                self.list_widget.addItem(f"{c.name}（{c.status}）")
+                self.list_widget.item(self.list_widget.count() - 1).setData(0x0100, c.id)
+        self.list_widget.blockSignals(False)
+        if self.list_widget.count():
+            self.list_widget.setCurrentRow(0)
+        else:
+            self._clear()
+
+    def _on_select(self, item):
+        if item is None or not self.storage:
+            return
+        c = self.storage.get_case(item.data(0x0100))
+        if c:
+            self._current_id = c.id
+            self.name_edit.setText(c.name)
+            self.clues_edit.setPlainText(c.clues)
+            self.twist_edit.setPlainText(c.twist)
+            self.truth_edit.setPlainText(c.truth)
+            idx = self.status_combo.findText(c.status)
+            self.status_combo.setCurrentIndex(max(0, idx))
+            self.fs_edit.setText(c.foreshadows)
+
+    def _save(self):
+        if not self.storage:
+            return
+        c = CaseCard(
+            id=self._current_id or 0,
+            book_id=self.storage.get_book().id,
+            name=self.name_edit.text().strip(),
+            clues=self.clues_edit.toPlainText().strip(),
+            twist=self.twist_edit.toPlainText().strip(),
+            truth=self.truth_edit.toPlainText().strip(),
+            status=self.status_combo.currentText(),
+            foreshadows=self.fs_edit.text().strip(),
+        )
+        if c.id:
+            self.storage.update_case(c)
+        else:
+            c.id = self.storage.add_case(c)
+        self._current_id = c.id
+        self.reload()
+
+    def _do_delete(self, rid):
+        self.storage.delete_case(rid)
+
+
+# ---------- J. 编年史（历史） ----------
+class ChronicleTab(_BaseTab):
+    def _build_form(self):
+        self.era_edit = _add_line(self.form, "朝代/年代", "如：唐 · 贞观年间")
+        self.title_edit = _add_line(self.form, "事件名", "如：玄武门之变")
+        self.year_edit = _add_line(self.form, "年份/序号", "如：贞观二年")
+        self.detail_edit = _add_multi(self.form, "说明", "事件经过、影响…")
+        move_row = QHBoxLayout()
+        up_btn = QPushButton("↑ 上移")
+        down_btn = QPushButton("↓ 下移")
+        up_btn.clicked.connect(lambda: self._swap_order(-1))
+        down_btn.clicked.connect(lambda: self._swap_order(1))
+        move_row.addWidget(up_btn)
+        move_row.addWidget(down_btn)
+        self.form.addRow("", move_row)
+        self.hint.setText("编年史：按年代排大事件，先列史实主线，再安排主角介入点。")
+
+    def _clear(self):
+        self.era_edit.clear()
+        self.title_edit.clear()
+        self.year_edit.clear()
+        self.detail_edit.clear()
+
+    def reload(self):
+        self.list_widget.blockSignals(True)
+        self.list_widget.clear()
+        if self.storage:
+            for e in self.storage.list_chronicle_events():
+                self.list_widget.addItem(
+                    f"{e.title}{('｜' + e.era) if e.era else ''}"
+                    f"{('（' + e.year + '）') if e.year else ''}")
+                self.list_widget.item(self.list_widget.count() - 1).setData(0x0100, e.id)
+        self.list_widget.blockSignals(False)
+        if self.list_widget.count():
+            self.list_widget.setCurrentRow(0)
+        else:
+            self._clear()
+
+    def _on_select(self, item):
+        if item is None or not self.storage:
+            return
+        e = next((x for x in self.storage.list_chronicle_events()
+                  if x.id == item.data(0x0100)), None)
+        if e:
+            self._current_id = e.id
+            self.era_edit.setText(e.era)
+            self.title_edit.setText(e.title)
+            self.year_edit.setText(e.year)
+            self.detail_edit.setPlainText(e.detail)
+
+    def _save(self):
+        if not self.storage:
+            return
+        e = ChronicleEvent(
+            id=self._current_id or 0,
+            book_id=self.storage.get_book().id,
+            era=self.era_edit.text().strip(),
+            title=self.title_edit.text().strip(),
+            year=self.year_edit.text().strip(),
+            detail=self.detail_edit.toPlainText().strip(),
+            order=self._current_id or 0,
+        )
+        if e.id:
+            e.order = next((x.order for x in self.storage.list_chronicle_events()
+                            if x.id == e.id), 0)
+            self.storage.update_chronicle_event(e)
+        else:
+            e.order = self.storage.max_chronicle_order() + 1
+            e.id = self.storage.add_chronicle_event(e)
+        self._current_id = e.id
+        self.reload()
+
+    def _do_delete(self, rid):
+        self.storage.delete_chronicle_event(rid)
+
+    def _swap_order(self, delta: int):
+        if not self.storage:
+            return
+        events = self.storage.list_chronicle_events()
+        cur = next((i for i, x in enumerate(events) if x.id == self._current_id), None)
+        if cur is None:
+            return
+        j = cur + delta
+        if j < 0 or j >= len(events):
+            return
+        events[cur], events[j] = events[j], events[cur]
+        for i, x in enumerate(events):
+            x.order = i + 1
+            self.storage.update_chronicle_event(x)
+        self.reload()
+        self.list_widget.setCurrentRow(j)
+
+
 # ---------- F. 类型模板预览 ----------
 class TypeTemplateTab(QWidget):
     def __init__(self, parent=None):
@@ -665,37 +1185,129 @@ class TypeTemplateTab(QWidget):
 
 
 class PlanningDialog(GradientDialog):
-    """📐 创作规划（弹窗）：伏笔 / 章节卡片 / 力量体系 / 弧光 / 时间线 / 类型模板。"""
+    """📐 创作规划（弹窗）：tab 按小说类型动态显示。
+
+    通用：伏笔 / 章节卡片 / 人物弧光 / 时间线 / 类型模板
+    类型专属：体系等级（修真/玄幻/武侠/奇幻/游戏/科幻）、科技树（科幻）、
+    案件线索（悬疑）、编年史（历史）；剧情线（多线节点）所有类型都有。
+    """
+
+    # 类型 → 专属 tab 键列表（"storyline" 追加在最后，所有类型都有）
+    _GENRE_TABS = {
+        "修真": ["power"],
+        "玄幻": ["power"],
+        "武侠": ["power"],
+        "奇幻": ["power"],
+        "游戏": ["power"],
+        "科幻": ["power", "tech"],
+        "悬疑": ["case"],
+        "历史": ["chronicle"],
+    }
 
     def __init__(self, parent=None, storage=None):
         super().__init__("📐 创作规划", parent, resizable=True)
         self.storage = None
+        self._tabs_genre = None
         self.setMinimumSize(660, 560)
         self.resize(880, 660)
         self.tabs = QTabWidget()
+        # 顶部：按章节过滤
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("按章节"))
+        self.chapter_combo = QComboBox()
+        self.chapter_combo.addItem("（全部章节）", 0)
+        self.chapter_combo.currentIndexChanged.connect(self._apply_filter)
+        filter_row.addWidget(self.chapter_combo, 1)
+        self.filter_hint = QLabel("过滤章节卡片 / 伏笔 / 剧情线")
+        self.filter_hint.setObjectName("mutedLabel")
+        filter_row.addWidget(self.filter_hint)
+        self.body.addLayout(filter_row)
+        # 通用 tab 实例
         self.foreshadow_tab = ForeshadowTab()
         self.card_tab = ChapterCardTab()
-        self.power_tab = PowerLevelTab()
         self.arc_tab = CharArcTab()
         self.timeline_tab = TimelineTab()
         self.template_tab = TypeTemplateTab()
-        self.tabs.addTab(self.foreshadow_tab, "🪝 伏笔")
-        self.tabs.addTab(self.card_tab, "📇 章节卡片")
-        self.tabs.addTab(self.power_tab, "⚔ 力量体系")
-        self.tabs.addTab(self.arc_tab, "🌀 人物弧光")
-        self.tabs.addTab(self.timeline_tab, "⏳ 时间线")
-        self.tabs.addTab(self.template_tab, "🗂 类型模板")
+        # 类型专属 tab 实例（按需 addTab）
+        self.power_tab = PowerLevelTab()
+        self.tech_tab = TechTreeTab()
+        self.case_tab = CaseTab()
+        self.chronicle_tab = ChronicleTab()
+        self.storyline_tab = StorylineTab()
         self.body.addWidget(self.tabs, 1)
         if storage is not None:
             self.set_storage(storage)
 
+    def _rebuild_tabs(self, genre: str):
+        """按类型重建 tab 集（同类型不重建，保留用户当前 tab）。"""
+        if genre == self._tabs_genre:
+            return
+        self._tabs_genre = genre
+        self.tabs.clear()
+        self.tabs.addTab(self.foreshadow_tab, "🪝 伏笔")
+        self.tabs.addTab(self.card_tab, "📇 章节卡片")
+        self.tabs.addTab(self.arc_tab, "🌀 人物弧光")
+        self.tabs.addTab(self.timeline_tab, "⏳ 时间线")
+        for key in self._GENRE_TABS.get(genre, []):
+            if key == "power":
+                self.tabs.addTab(self.power_tab, "⚔ 体系等级")
+            elif key == "tech":
+                self.tabs.addTab(self.tech_tab, "🔬 科技树")
+            elif key == "case":
+                self.tabs.addTab(self.case_tab, "🕵 案件线索")
+            elif key == "chronicle":
+                self.tabs.addTab(self.chronicle_tab, "📜 编年史")
+        self.tabs.addTab(self.storyline_tab, "📈 剧情线")
+        self.tabs.addTab(self.template_tab, "🗂 类型模板")
+
     def set_storage(self, storage):
         self.storage = storage
+        genre = ""
+        if storage is not None:
+            try:
+                genre = storage.get_book().genre or ""
+            except Exception:  # noqa: BLE001
+                pass
+        self._rebuild_tabs(genre)
+        # 章节过滤下拉：全部 + 各章节
+        self.chapter_combo.blockSignals(True)
+        self.chapter_combo.clear()
+        self.chapter_combo.addItem("（全部章节）", 0)
+        if storage is not None:
+            try:
+                for ch in storage.list_chapters():
+                    self.chapter_combo.addItem(ch.title, ch.id)
+            except Exception:  # noqa: BLE001
+                pass
+        self.chapter_combo.blockSignals(False)
         for t in (self.foreshadow_tab, self.card_tab, self.power_tab,
-                  self.arc_tab, self.timeline_tab, self.template_tab):
+                  self.tech_tab, self.case_tab, self.chronicle_tab,
+                  self.arc_tab, self.timeline_tab, self.storyline_tab,
+                  self.template_tab):
             t.set_storage(storage)
+        self._apply_filter()
+
+    def _apply_filter(self):
+        """按章节过滤分发：章节卡片按 id，伏笔/剧情线按标题文本。"""
+        cid = int(self.chapter_combo.currentData() or 0)
+        title = self.chapter_combo.currentText() if cid else ""
+        self.card_tab.set_chapter_filter(cid)
+        self.foreshadow_tab.set_chapter_filter(title)
+        self.storyline_tab.set_chapter_filter(title)
+
+    def focus_current_chapter(self, chapter_id: int = 0, chapter_title: str = ""):
+        """定位到某章节：过滤下拉选中它，并跳到章节卡片 tab。"""
+        if chapter_id:
+            idx = self.chapter_combo.findData(chapter_id)
+            if idx >= 0:
+                self.chapter_combo.setCurrentIndex(idx)
+                self.tabs.setCurrentWidget(self.card_tab)
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def reload(self):
         for t in (self.foreshadow_tab, self.card_tab, self.power_tab,
-                  self.arc_tab, self.timeline_tab):
+                  self.tech_tab, self.case_tab, self.chronicle_tab,
+                  self.arc_tab, self.timeline_tab, self.storyline_tab):
             t.reload()
