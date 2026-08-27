@@ -443,6 +443,20 @@ QTabBar QToolButton:hover {
 QTabBar QToolButton:pressed {
     background: {BTN_PRESS};
 }
+/* 底部导航（logDockTabs）：当前激活页明显高亮 */
+QTabWidget#logDockTabs > QTabBar::tab {
+    padding: 5px 12px;
+    margin: 1px 1px;
+}
+QTabWidget#logDockTabs > QTabBar::tab:selected {
+    background: {PRIMARY};
+    color: {SELECTFG};
+    font-weight: bold;
+    border-radius: 7px;
+}
+QTabWidget#logDockTabs > QTabBar::tab:hover:!selected {
+    background: {BTN};
+}
 
 /* ================= Dock ================= */
 QDockWidget {

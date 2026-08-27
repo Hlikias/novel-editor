@@ -133,9 +133,64 @@ class SearchView(QWidget):
             self.open_requested.emit(ch_id)
 
 
+class ChapterListView(QWidget):
+    """📖 章节速查（底部导航页）：全部章节列表，点击打开，当前章高亮。"""
+
+    open_requested = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.storage = None
+        self._current_cid = None
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(4)
+        self.list_widget = QListWidget()
+        self.list_widget.itemDoubleClicked.connect(self._open_item)
+        lay.addWidget(self.list_widget, 1)
+        self.status = QLabel("打开项目后显示章节列表；双击打开章节，当前章节会高亮。")
+        self.status.setObjectName("mutedLabel")
+        lay.addWidget(self.status)
+
+    def set_storage(self, storage):
+        self.storage = storage
+        self._current_cid = None
+        self.refresh()
+
+    def refresh(self):
+        self.list_widget.blockSignals(True)
+        self.list_widget.clear()
+        if self.storage:
+            for ch in sorted(self.storage.list_chapters(), key=lambda c: (c.order, c.id)):
+                item = QListWidgetItem(f"{ch.title}（{ch.word_count} 字）")
+                item.setData(0x0100, ch.id)
+                self.list_widget.addItem(item)
+        self.list_widget.blockSignals(False)
+        self._mark_current()
+
+    def set_current(self, chapter_id: int):
+        """高亮当前打开的章节。"""
+        self._current_cid = chapter_id
+        self._mark_current()
+
+    def _mark_current(self):
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            cur = item.data(0x0100) == self._current_cid
+            f = item.font()
+            f.setBold(cur)
+            item.setFont(f)
+            item.setSelected(cur)
+            item.setForeground(Qt.GlobalColor.black if False else item.foreground())
+
+    def _open_item(self, item):
+        cid = item.data(0x0100)
+        if cid is not None:
+            self.open_requested.emit(int(cid))
+
+
 class NotesView(QWidget):
     """📝 灵感便签：随手记录，随项目保存。"""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.storage = None
