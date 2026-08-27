@@ -41,6 +41,19 @@ class StatsView(QWidget):
         self.tree.setColumnWidth(0, 130)
         layout.addWidget(self.tree, 1)
 
+        # D 项：空状态引导（无章节时提示下一步）
+        self.empty_hint = QLabel(
+            "📝 还没有章节。\n\n"
+            "· 点击左侧「➕ 新建章节」开始写作\n"
+            "· 或 Ctrl+N 新建项目，Ctrl+Shift+C 批量建章节\n"
+            "· 写下的每一章都会自动统计字数"
+        )
+        self.empty_hint.setObjectName("mutedLabel")
+        self.empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_hint.setWordWrap(True)
+        self.empty_hint.hide()
+        layout.addWidget(self.empty_hint, 1)
+
     def set_storage(self, storage):
         self.storage = storage
         self.refresh()
@@ -49,11 +62,17 @@ class StatsView(QWidget):
         if not self.storage:
             self.summary.setText("未打开项目")
             self.tree.clear()
+            self.tree.hide()
+            self.empty_hint.setText("📂 未打开项目。\n\n点击「打开项目」或 Ctrl+O 载入一本小说。")
+            self.empty_hint.show()
             return
         book = self.storage.get_book()
         if book is None:
             self.summary.setText("项目数据缺失")
             self.tree.clear()
+            self.tree.hide()
+            self.empty_hint.setText("⚠ 项目数据缺失。")
+            self.empty_hint.show()
             return
         chapters = self.storage.list_chapters()
         total = sum(c.word_count for c in chapters)
@@ -63,6 +82,18 @@ class StatsView(QWidget):
             self.tree.addTopLevelItem(
                 QTreeWidgetItem([ch.title, str(ch.word_count), ch.status])
             )
+        if chapters:
+            self.tree.show()
+            self.empty_hint.hide()
+        else:
+            self.tree.hide()
+            self.empty_hint.setText(
+                "📝 还没有章节。\n\n"
+                "· 点击左侧「➕ 新建章节」开始写作\n"
+                "· 或 Ctrl+Shift+C 打开章节管理批量建章\n"
+                "· 写下的每一章都会自动统计字数"
+            )
+            self.empty_hint.show()
 
 
 class SearchView(QWidget):
@@ -95,19 +126,37 @@ class SearchView(QWidget):
         self.status.setObjectName("mutedLabel")
         layout.addWidget(self.status)
 
+        # D 项：空状态引导（未搜索 / 无结果时）
+        self.empty_hint = QLabel(
+            "🔍 输入关键词（支持标题/摘要/正文），回车或点「搜索」。\n\n"
+            "例如：主角名、地名、某句台词——快速定位到对应章节。"
+        )
+        self.empty_hint.setObjectName("mutedLabel")
+        self.empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_hint.setWordWrap(True)
+        self.empty_hint.hide()
+        layout.addWidget(self.empty_hint, 1)
+
     def set_storage(self, storage):
         self.storage = storage
         self.results.clear()
         self.status.setText("")
+        if storage is None:
+            self.empty_hint.setText("📂 请先打开项目（Ctrl+O）再搜索。")
+            self.empty_hint.show()
 
     def do_search(self):
         self.results.clear()
         if not self.storage:
             self.status.setText("请先打开项目")
+            self.empty_hint.setText("📂 请先打开项目（Ctrl+O）再搜索。")
+            self.empty_hint.show()
             return
         kw = self.input.text().strip().lower()
         if not kw:
             self.status.setText("请输入关键词")
+            self.empty_hint.setText("🔍 输入关键词（支持标题/摘要/正文），回车或点「搜索」。")
+            self.empty_hint.show()
             return
         count = 0
         for ch in self.storage.list_chapters():
@@ -126,6 +175,16 @@ class SearchView(QWidget):
             self.results.addItem(item)
             count += 1
         self.status.setText(f"找到 {count} 个章节")
+        if count:
+            self.empty_hint.hide()
+        else:
+            self.empty_hint.setText(
+                f"没有找到「{self.input.text().strip()}」。\n\n"
+                "· 试试换一个关键词（人物名/地名/常用词）\n"
+                "· 确认该词确实在正文里写过\n"
+                "· 或先写几章内容，让全书可搜"
+            )
+            self.empty_hint.show()
 
     def _open_result(self, item):
         ch_id = item.data(0x0100)

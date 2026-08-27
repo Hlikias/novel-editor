@@ -1872,11 +1872,28 @@ class MainWindow(QMainWindow):
         self.total_label = QLabel("全书 0 字 · 0 章")
         self.enc_label = QLabel("UTF-8")
         self.mod_label = QLabel("")
+        # F：状态栏显示项（配置可勾选）——key → (widget, 名称)
+        self._status_widgets = {
+            "book": self.book_label,
+            "pos": self.pos_label,
+            "chars": self.words_label,
+            "total": self.total_label,
+            "enc": self.enc_label,
+            "mod": self.mod_label,
+        }
         for w in (self.book_label, self.pos_label, self.words_label,
                   self.total_label, self.enc_label, self.mod_label):
             w.setContentsMargins(8, 0, 8, 0)
             bar.addWidget(w, 1 if w is self.book_label else 0)
         bar.addPermanentWidget(QLabel("PySide6"), 0)
+        self._sync_status_items()
+
+    def _sync_status_items(self):
+        """按配置的 status_items 隐藏/显示状态栏各项（F 项）。"""
+        items = self.config.get("app", {}).get("status_items")
+        items = items if isinstance(items, list) else ["book", "pos", "chars", "total", "enc", "mod"]
+        for key, widget in getattr(self, "_status_widgets", {}).items():
+            widget.setVisible(key in items)
 
     # ================= 日志 =================
     def log(self, msg: str, level: str = "info"):
@@ -2953,15 +2970,19 @@ class MainWindow(QMainWindow):
         self.log(f"已导出项目信息: {path}", "ok")
 
     # ---------- 主题 ----------
-    def _apply_theme(self, name: str | None = None, overrides: dict | None = None):
+    def _apply_theme(self, name: str | None = None, overrides: dict | None = None,
+                     ui_scale: float | None = None):
         name = name or self.config.get("app", {}).get("theme", "light")
         overrides = overrides or self.config.get("app", {}).get("custom_colors", {})
-        key = (name, tuple(sorted((overrides or {}).items())))
+        if ui_scale is None:
+            ui_scale = float(self.config.get("app", {}).get("ui_scale", 1.0))
+        key = (name, tuple(sorted((overrides or {}).items())), ui_scale)
         if key == getattr(self, "_applied_theme_key", None):
-            return   # 主题/颜色未变：跳过全局 QSS 重建（设置保存卡顿的主因）
+            return   # 主题/颜色/缩放未变：跳过全局 QSS 重建（设置保存卡顿的主因）
         self._applied_theme_key = key
         theme.set_active(name, overrides)
-        QApplication.instance().setStyleSheet(theme.build_stylesheet(name, overrides))
+        QApplication.instance().setStyleSheet(
+            theme.build_stylesheet(name, overrides, ui_scale=ui_scale))
         for editor in self._tab_chapters.values():
             editor.refresh_theme()
         self._update_theme_checks()
@@ -3012,7 +3033,8 @@ class MainWindow(QMainWindow):
         for editor in self._tab_chapters.values():
             editor.apply_config(config)
         self.ai_panel.update_config(config)
-        self._apply_theme()   # 主题/自定义颜色可能也改了
+        self._apply_theme()   # 主题/自定义颜色/界面缩放可能也改了
+        self._sync_status_items()   # 状态栏显示项可能改了
         self._apply_shortcuts()   # 快捷键可能也改了
         self._restart_autosave_timer()
         # 同步设置菜单里的开关状态

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 
-from PySide6.QtCore import QEvent, QRectF, Qt
+from PySide6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, QRectF, Qt
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QApplication, QDialog, QHBoxLayout, QLabel, QPushButton, QScrollArea,
@@ -206,6 +206,25 @@ class GradientDialog(QDialog):
 
         self._root.addWidget(self._frame)
         self._restore_geometry()
+        # E 项：弹窗淡入动画（结束后置回不透明，避免残影/截图异常）
+        self._fade_anim = QPropertyAnimation(self, b"windowOpacity", self)
+        self._fade_anim.setDuration(160)
+        self._fade_anim.setStartValue(0.0)
+        self._fade_anim.setEndValue(1.0)
+        self._fade_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._fade_anim.finished.connect(
+            lambda: self.setWindowOpacity(1.0) if getattr(self, "_alive", True) else None
+        )
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if getattr(self, "_alive", True) and self._fade_anim.state() != QPropertyAnimation.State.Running:
+            # 第二次及以后显示不重复淡入；仅首次打开时播放
+            if not getattr(self, "_faded_once", False):
+                self._faded_once = True
+                self.setWindowOpacity(0.0)
+                self._fade_anim.stop()
+                self._fade_anim.start()
 
     # ---------- 窗口尺寸记忆 ----------
     def _restore_geometry(self):

@@ -25,16 +25,20 @@ from .theme import PALETTE
 
 INDENT_FULLWIDTH = "\u3000\u3000"  # 两个全角空格
 
-# 编辑器风格预设：背景/文字/行号/当前行
+# 编辑器风格预设：背景/文字/行号/当前行/选中文字
 STYLE_PRESETS = {
     "暖纸": {"bg": "#FDF6EC", "fg": "#403C30", "line_bg": "#F6EEDC",
-             "line_fg": "#B3A98C", "cur": "#F8F1DD"},
+             "line_fg": "#B3A98C", "cur": "#F8F1DD",
+             "sel": "#E8D9BC", "sel_fg": "#33291C"},
     "纯白": {"bg": "#FFFFFF", "fg": "#333333", "line_bg": "#F5F5F5",
-             "line_fg": "#9AA0A6", "cur": "#EAF3FB"},
+             "line_fg": "#9AA0A6", "cur": "#EAF3FB",
+             "sel": "#C9E2F7", "sel_fg": "#1F3A57"},
     "护眼绿": {"bg": "#EAF5EC", "fg": "#2E3D33", "line_bg": "#E0F0E2",
-               "line_fg": "#8AA99B", "cur": "#DCEFE0"},
+               "line_fg": "#8AA99B", "cur": "#DCEFE0",
+               "sel": "#B9DCC3", "sel_fg": "#1F3A2B"},
     "暗夜": {"bg": "#232A26", "fg": "#D8E4DC", "line_bg": "#1E2521",
-             "line_fg": "#5C6E64", "cur": "#2A332E"},
+             "line_fg": "#5C6E64", "cur": "#2A332E",
+             "sel": "#3D5A4B", "sel_fg": "#EAF4EE"},
 }
 
 
@@ -490,8 +494,13 @@ class EditorWidget(QTextEdit):
             colors = self._style_colors()
             # EditorWidget 是 QTextEdit，QSS 类型选择器必须用 QTextEdit
             self.setStyleSheet(
-                f"QTextEdit {{ background-color: {colors['bg']}; color: {colors['fg']}; }}"
+                f"QTextEdit {{ background-color: {colors['bg']}; color: {colors['fg']}; "
+                f"selection-background-color: {colors['sel']}; "
+                f"selection-color: {colors['sel_fg']}; }}"
             )
+            # 光标加宽 2px，更易定位（C 项视觉微调）
+            if self.cursorWidth() != 2:
+                self.setCursorWidth(2)
             pct = int(self.config.get("editor", {}).get("line_height", 130))
             if pct != getattr(self, "_applied_line_height", None):
                 self._applied_line_height = pct
@@ -551,6 +560,12 @@ class EditorWidget(QTextEdit):
                 0, y, self.line_number_area.width() - 6, fm_height,
                 Qt.AlignRight, str(line + 1),
             )
+        # C 项视觉微调：行号区右缘一条 1px 细分隔线（半透明主题色）
+        sep = QColor(colors.get("line_fg", "#9AA0A6"))
+        sep.setAlpha(70)
+        painter.setPen(sep)
+        x = self.line_number_area.width() - 1
+        painter.drawLine(x, 0, x, self.line_number_area.height())
 
     # ---------- 高亮（当前行 + 查找匹配） ----------
     def _update_extra_selections(self):

@@ -47,10 +47,35 @@ class ConsistencyView(QWidget):
         self.tabs.addTab(self.appear_list, "角色出场")
         lay.addWidget(self.tabs, 1)
 
+        # D 项：空状态引导
+        self.empty_hint = QLabel(
+            "🔗 还没扫描过。\n\n"
+            "· 「扫描全书一致性」：对照角色库/设定库，找出正文里疑似写错的人名设定名\n"
+            "· 「角色出场统计」：看谁好久没出场，避免角色断线"
+        )
+        self.empty_hint.setObjectName("mutedLabel")
+        self.empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_hint.setWordWrap(True)
+        self.empty_hint.hide()
+        lay.addWidget(self.empty_hint, 1)
+
     def set_storage(self, storage):
         self.storage = storage
         self.hint_list.clear()
         self.appear_list.clear()
+        if storage is None:
+            self.tabs.hide()
+            self.empty_hint.setText("📂 请先打开项目（Ctrl+O），再扫描全书一致性。")
+            self.empty_hint.show()
+        else:
+            # 尚未扫描：隐藏空 tab，展示引导（扫描后由 do_scan/do_appearances 恢复）
+            self.tabs.hide()
+            self.empty_hint.setText(
+                "🔗 还没扫描过。\n\n"
+                "· 「扫描全书一致性」：对照角色库/设定库，找出正文里疑似写错的人名设定名\n"
+                "· 「角色出场统计」：看谁好久没出场，避免角色断线"
+            )
+            self.empty_hint.show()
 
     def do_scan(self):
         if not self.storage:
@@ -58,9 +83,11 @@ class ConsistencyView(QWidget):
             return
         self.hint_list.clear()
         hints = scan_consistency(self.storage)
+        self.tabs.show()
         if not hints:
             self.hint_list.addItem("✅ 未发现与角色库/设定库名字疑似不一致的地方。")
             self.status.setText("扫描完成：未发现不一致")
+            self.empty_hint.hide()
             return
         for h in hints:
             item = QListWidgetItem(
@@ -70,6 +97,7 @@ class ConsistencyView(QWidget):
             item.setToolTip("双击打开对应章节")
             self.hint_list.addItem(item)
         self.status.setText(f"扫描完成：发现 {len(hints)} 处疑似不一致（双击跳转）")
+        self.empty_hint.hide()
 
     def _open_hint(self, item):
         cid = item.data(0x0100)
@@ -82,9 +110,16 @@ class ConsistencyView(QWidget):
             return
         self.appear_list.clear()
         rows = count_appearances(self.storage)
+        self.tabs.show()
         if not rows:
             self.appear_list.addItem("（角色库为空或没有正文）")
             self.status.setText("角色出场统计完成")
+            self.empty_hint.setText(
+                "👥 角色库为空或没有正文。\n\n"
+                "· 在「项目 → 角色 / 武器 / 属性」里添加角色\n"
+                "· 或先写几章正文，再回来统计出场"
+            )
+            self.empty_hint.show()
             return
         for r in rows:
             item = QListWidgetItem(
@@ -93,3 +128,4 @@ class ConsistencyView(QWidget):
             item.setToolTip("、".join(r["chapters"]) or "未出场")
             self.appear_list.addItem(item)
         self.status.setText(f"共 {len(rows)} 个角色，按出场章数降序")
+        self.empty_hint.hide()

@@ -57,6 +57,34 @@ class SettingsDialog(GradientDialog):
         self.recent_limit_spin.setValue(int(app_cfg.get("recent_limit", 8)))
         general_form.addRow("最近项目保留条数", self.recent_limit_spin)
 
+        # ---- A：界面缩放（字号适配高分屏） ----
+        self.ui_scale_combo = QComboBox()
+        for _v in (0.9, 1.0, 1.1, 1.2, 1.3):
+            self.ui_scale_combo.addItem(f"{_v:.1f}×（{'标准' if _v == 1.0 else '缩放'}）", _v)
+        cur_scale = float(app_cfg.get("ui_scale", 1.0))
+        idx = self.ui_scale_combo.findData(cur_scale)
+        self.ui_scale_combo.setCurrentIndex(max(0, idx))
+        self.ui_scale_combo.setToolTip("整体界面字号缩放（0.9~1.3×），2K/高分屏可调大")
+        general_form.addRow("界面缩放", self.ui_scale_combo)
+
+        # ---- F：状态栏显示项 ----
+        self.status_checks: dict[str, QCheckBox] = {}
+        status_items = app_cfg.get("status_items")
+        status_items = status_items if isinstance(status_items, list) else ["book", "pos", "chars", "total", "enc", "mod"]
+        status_labels = {
+            "book": "项目名称",
+            "pos": "光标位置",
+            "chars": "本章字数",
+            "total": "全书字数与章节数",
+            "enc": "文件编码",
+            "mod": "保存状态",
+        }
+        for key, label in status_labels.items():
+            cb = QCheckBox(label)
+            cb.setChecked(key in status_items)
+            self.status_checks[key] = cb
+            general_form.addRow("", cb)
+
         self.tabs.addTab(general_tab, "⚙ 通用")
 
         # ---------- 隐私保护 ----------
@@ -398,6 +426,8 @@ class SettingsDialog(GradientDialog):
         app["autosave_minutes"] = self.autosave_min_spin.value()
         app["open_recent_on_start"] = self.open_recent_check.isChecked()
         app["recent_limit"] = self.recent_limit_spin.value()
+        app["ui_scale"] = float(self.ui_scale_combo.currentData())
+        app["status_items"] = [k for k, cb in self.status_checks.items() if cb.isChecked()]
 
         # 隐私保护
         privacy = self.config.setdefault("privacy", {})

@@ -101,12 +101,105 @@ PRESETS: dict = {
             "selection_bg": "#F0D8C8", "selection_fg": "#5A4236",
         },
     },
+    # ================= 护眼绿（柔和绿底） =================
+    "green": {
+        "tokens": {
+            "WINDOW": "#F2F6EE", "TITLEBAR": "#9DBB8C",
+            "MENUBTN": "#E6EEE0", "MENUBTN_HOVER": "#D8E5CF",
+            "BTN": "#EDF3E8", "BTN_HOVER": "#DEE9D6", "BTN_PRESS": "#D0E0C7",
+            "PRIMARY": "#A8C69B", "PRIMARY_HOVER": "#92B584",
+            "INPUT": "#FBFDF9", "INPUT_FOCUS": "#F5F9F0",
+            "LISTBG": "#F1F6EC", "ITEMHOVER": "#E4EEDD", "ITEMSELECT": "#D5E6CC",
+            "PANE": "#FBFDF9", "TABTEXT": "#7C9270",
+            "STATUS": "#EDF3E6", "STATUSTEXT": "#5A6E4E",
+            "DOCKTITLE": "#EEF4E8", "DOCKBODY": "#EDF3E7", "LOG": "#E8F0E1",
+            "TEXT": "#44503C", "MUTED": "#7C9270", "ACCENT_TEXT": "#4E7A3E",
+            "WINBTN_TEXT": "#3E5A32", "WINBTN_HOVER": "rgba(62,90,50,0.12)",
+            "CLOSE_HOVER": "#EDD3C8", "CLOSE_HOVER_TEXT": "#B06A4E",
+            "DIALOG_GRAD_A": "#A6C698", "DIALOG_GRAD_B": "#83A976",
+            "SELECTBG": "#CDE2C2", "SELECTFG": "#2F4A24",
+            "SCROLL": "#C8DBC0", "SCROLL_HOVER": "#AEC8A4",
+            "PROGRESS": "#8FB57F", "PROGRESSBG": "#E0EAD8",
+            "CHECK": "#DCE8D4", "CHECKED": "#93B784",
+            "HEADER": "#EAF2E3", "SEPLINE": "#D5E3CB",
+            "SPLITTER": "#C2D6B6",
+            "WELCOME_BTN": "#A8C69B", "WELCOME_BTN_HOVER": "#92B584",
+        },
+        "palette": {
+            "editor_bg": "#F5F8F0", "line_number_bg": "#EDF2E6",
+            "line_number_fg": "#9AAB8C", "current_line": "#EFF4E8",
+            "selection_bg": "#D5E6CC", "selection_fg": "#2F4A24",
+        },
+    },
+    # ================= 墨蓝（深蓝护眼夜用） =================
+    "blue": {
+        "tokens": {
+            "WINDOW": "#1B2126", "TITLEBAR": "#2C3E4E",
+            "MENUBTN": "#36485A", "MENUBTN_HOVER": "#42566A",
+            "BTN": "#2A3A48", "BTN_HOVER": "#36485A", "BTN_PRESS": "#425A6E",
+            "PRIMARY": "#4E82A8", "PRIMARY_HOVER": "#3F7297",
+            "INPUT": "#232D36", "INPUT_FOCUS": "#2A3742",
+            "LISTBG": "#212B33", "ITEMHOVER": "#2C3B47", "ITEMSELECT": "#3A5569",
+            "PANE": "#1E272E", "TABTEXT": "#6F8798",
+            "STATUS": "#202A32", "STATUSTEXT": "#93A9B8",
+            "DOCKTITLE": "#25313A", "DOCKBODY": "#222D34", "LOG": "#1F292F",
+            "TEXT": "#C2D0D9", "MUTED": "#6F8798", "ACCENT_TEXT": "#7FB4D8",
+            "WINBTN_TEXT": "#C2D0D9", "WINBTN_HOVER": "rgba(255,255,255,0.10)",
+            "CLOSE_HOVER": "#8E5A52", "CLOSE_HOVER_TEXT": "#F2C4BE",
+            "DIALOG_GRAD_A": "#3A5569", "DIALOG_GRAD_B": "#2A3A48",
+            "SELECTBG": "#3A5569", "SELECTFG": "#D5E2EA",
+            "SCROLL": "#3A4E5E", "SCROLL_HOVER": "#4A6375",
+            "PROGRESS": "#5A90B5", "PROGRESSBG": "#2A3A48",
+            "CHECK": "#36485A", "CHECKED": "#5A90B5",
+            "HEADER": "#2A3A48", "SEPLINE": "#36485A",
+            "SPLITTER": "#47607A",
+            "WELCOME_BTN": "#4E82A8", "WELCOME_BTN_HOVER": "#3F7297",
+        },
+        "palette": {
+            "editor_bg": "#232D36", "line_number_bg": "#1F2830",
+            "line_number_fg": "#587084", "current_line": "#2A3742",
+            "selection_bg": "#3A5569", "selection_fg": "#D5E2EA",
+        },
+    },
+    # ================= 羊皮纸（米黄纸感） =================
+    "paper": {
+        "tokens": {
+            "WINDOW": "#F7F2E6", "TITLEBAR": "#D9C9A3",
+            "MENUBTN": "#EFE8D7", "MENUBTN_HOVER": "#E6DCC5",
+            "BTN": "#F1EBDB", "BTN_HOVER": "#E5DCC5", "BTN_PRESS": "#D8CDB2",
+            "PRIMARY": "#CDB98F", "PRIMARY_HOVER": "#BFA876",
+            "INPUT": "#FDFAF2", "INPUT_FOCUS": "#F9F3E4",
+            "LISTBG": "#F6F0E2", "ITEMHOVER": "#EBE2CD", "ITEMSELECT": "#DDD0B4",
+            "PANE": "#FDFAF2", "TABTEXT": "#8F7F60",
+            "STATUS": "#F2ECDB", "STATUSTEXT": "#6E5F45",
+            "DOCKTITLE": "#F1EBDC", "DOCKBODY": "#F2ECDD", "LOG": "#EDE6D4",
+            "TEXT": "#4E452F", "MUTED": "#8F7F60", "ACCENT_TEXT": "#8A6D3B",
+            "WINBTN_TEXT": "#5A4A2E", "WINBTN_HOVER": "rgba(90,74,46,0.12)",
+            "CLOSE_HOVER": "#E8CFC0", "CLOSE_HOVER_TEXT": "#A8664E",
+            "DIALOG_GRAD_A": "#D5C49C", "DIALOG_GRAD_B": "#BBA76F",
+            "SELECTBG": "#E0D4B8", "SELECTFG": "#4E4329",
+            "SCROLL": "#D9CEB6", "SCROLL_HOVER": "#C5B695",
+            "PROGRESS": "#BDA86F", "PROGRESSBG": "#E9E2CF",
+            "CHECK": "#E3DAC4", "CHECKED": "#BFA876",
+            "HEADER": "#F0E9D7", "SEPLINE": "#DFD5BD",
+            "SPLITTER": "#D0C2A2",
+            "WELCOME_BTN": "#CDB98F", "WELCOME_BTN_HOVER": "#BFA876",
+        },
+        "palette": {
+            "editor_bg": "#F8F1DD", "line_number_bg": "#F2E9D3",
+            "line_number_fg": "#B3A98C", "current_line": "#F5EDD8",
+            "selection_bg": "#E0D4B8", "selection_fg": "#4E4329",
+        },
+    },
 }
 
 THEME_NAMES = {
     "light": "小清新（浅色薄荷）",
     "dark": "暗夜（深色）",
     "pink": "樱花粉",
+    "green": "护眼绿",
+    "blue": "墨蓝（夜用）",
+    "paper": "羊皮纸",
 }
 
 # 编辑器手绘用的活动调色板（原地更新，editor.py 引用同一对象）
@@ -761,11 +854,14 @@ QToolTip {
 """
 
 # 编辑器文字颜色随主题
-_EDITOR_FG = {"light": "#403C30", "dark": "#D8E4DC", "pink": "#5A4A4E"}
+_EDITOR_FG = {"light": "#403C30", "dark": "#D8E4DC", "pink": "#5A4A4E",
+              "green": "#44503C", "blue": "#D8E4DC", "paper": "#4E452F"}
 
 
-def build_stylesheet(name: str | None = None, overrides: dict | None = None) -> str:
-    """生成主题 QSS；name 为空时用当前激活主题。"""
+def build_stylesheet(name: str | None = None, overrides: dict | None = None,
+                     ui_scale: float = 1.0) -> str:
+    """生成主题 QSS；name 为空时用当前激活主题。
+    ui_scale：界面字号缩放（0.9~1.3，适配高分屏）。"""
     if name is None:
         name = _ACTIVE
     if name not in PRESETS:
@@ -782,4 +878,9 @@ def build_stylesheet(name: str | None = None, overrides: dict | None = None) -> 
     qss = _QSS_TEMPLATE
     for key, value in tokens.items():
         qss = qss.replace("{" + key + "}", value)
+    if ui_scale and ui_scale != 1.0:
+        import re
+        qss = re.sub(r"font-size:\s*(\d+)px",
+                     lambda m: f"font-size: {max(8, int(int(m.group(1)) * ui_scale))}px",
+                     qss)
     return qss
