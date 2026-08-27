@@ -674,8 +674,7 @@ class MainWindow(QMainWindow):
         self.tabs.setDocumentMode(True)
         self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.currentChanged.connect(lambda _i: (self._update_status(), self._update_preview(),
-                                                     self._refresh_snap(),
-                                                     self._sync_chapter_list()))
+                                                     self._refresh_snap()))
         self.tabs.tabBarDoubleClicked.connect(self._rename_tab_chapter)   # 双击 tab 重命名章节
 
         # 编辑器页 = 顶部格式工具栏 + 标签页
@@ -1392,13 +1391,6 @@ class MainWindow(QMainWindow):
         self.log_dock.setObjectName("log_dock")
         self.bottom_tabs = QTabWidget()
         self.bottom_tabs.setObjectName("logDockTabs")
-        # 章节速查 + AI 面板放在最前（找不到章节/AI 时底部导航直达）
-        from .panels import ChapterListView
-        self.chapter_list_view = ChapterListView()
-        self.chapter_list_view.open_requested.connect(self.open_chapter)
-        self.bottom_tabs.addTab(self.chapter_list_view, "📖 章节")
-        self.ai_panel_bottom = AIPanel(self.config)
-        self.bottom_tabs.addTab(self.ai_panel_bottom, "🤖 AI")
         self.log_view = QPlainTextEdit()
         self.log_view.setObjectName("logView")
         self.log_view.setReadOnly(True)
@@ -1956,8 +1948,6 @@ class MainWindow(QMainWindow):
         self.check_view.set_storage(storage)
         if hasattr(self, "consistency_view"):
             self.consistency_view.set_storage(storage)
-        if hasattr(self, "chapter_list_view"):
-            self.chapter_list_view.set_storage(storage)
         self.outline_view.set_storage(storage)
         self.overview_view.set_storage(storage)
         self._refresh_chapter_dock()
@@ -1986,8 +1976,6 @@ class MainWindow(QMainWindow):
         self.check_view.set_storage(None)
         if hasattr(self, "consistency_view"):
             self.consistency_view.set_storage(None)
-        if hasattr(self, "chapter_list_view"):
-            self.chapter_list_view.set_storage(None)
         self.outline_view.set_storage(None)
         self.overview_view.set_storage(None)
         # 回到欢迎页
@@ -2253,8 +2241,6 @@ class MainWindow(QMainWindow):
         self.tabs.setCurrentIndex(idx)
         self._update_status()
         self._refresh_snap()
-        if hasattr(self, "chapter_list_view"):
-            self.chapter_list_view.set_current(chapter_id)
         self._record_open_tabs()
 
     def _new_editor(self, chapter_id: int | None) -> EditorWidget:
@@ -2686,14 +2672,6 @@ class MainWindow(QMainWindow):
                 self.snap_float.show()
                 self.snap_float.raise_()
 
-    def _sync_chapter_list(self):
-        """底部「章节」页跟随当前打开的章节高亮。"""
-        if not hasattr(self, "chapter_list_view"):
-            return
-        editor = self.current_editor()
-        cid = getattr(editor, "chapter_id", None) or 0
-        self.chapter_list_view.set_current(cid)
-
     def _refresh_snap(self):
         """刷新「本章速览」面板与悬浮窗（跟随当前章节）。"""
         if not hasattr(self, "snap_panel"):
@@ -3001,8 +2979,6 @@ class MainWindow(QMainWindow):
         for editor in self._tab_chapters.values():
             editor.apply_config(config)
         self.ai_panel.update_config(config)
-        if hasattr(self, "ai_panel_bottom"):
-            self.ai_panel_bottom.update_config(config)
         self._apply_theme()   # 主题/自定义颜色可能也改了
         self._apply_shortcuts()   # 快捷键可能也改了
         self._restart_autosave_timer()
