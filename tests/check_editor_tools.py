@@ -65,13 +65,13 @@ ed.set_content("　　林")
 app.processEvents()
 c = ed.textCursor(); c.movePosition(c.MoveOperation.End); ed.setTextCursor(c)
 ed._maybe_name_complete()
-assert ed._name_popup.isVisible(), "补全弹窗应显示"
-assert ed._name_popup.list.count() >= 2
-print("5) A 人名补全弹窗 OK")
-# 选中第一个并回车插入
-ed._name_popup.list.setCurrentRow(0)
-ed._insert_completion(ed._name_popup.selected())
-assert ed.toPlainText().endswith(ed._name_popup.list.item(0).text()) or "林晚" in ed.toPlainText()
+assert ed._name_popup.isVisible(), "补全下拉应显示"
+names_in_menu = [a.text() for a in ed._name_popup.actions()]
+assert len(names_in_menu) >= 2, names_in_menu
+print("5) A 人名补全下拉 OK:", names_in_menu)
+ed._insert_completion(names_in_menu[0])
+assert names_in_menu[0] in ed.toPlainText()
+ed._name_popup.hide()
 print("   补全插入 OK")
 
 # ---------- D：回收站（软删除/恢复/彻底删） ----------

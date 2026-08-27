@@ -497,6 +497,7 @@ class MainWindow(QMainWindow):
         self._add_action(project_menu, "ℹ 项目信息…", self.show_project_info_dialog, None, None)
         project_menu.addSeparator()
         self._add_action(project_menu, "🗂 章节管理…", self.show_chapter_dialog, "Ctrl+Shift+C", None)
+        self._add_action(project_menu, "📛 取名器…", self._show_name_dialog, None, None)
         self._add_action(project_menu, "🗑 回收站…", self._show_recycle_dialog, None, None)
         self._add_action(project_menu, "👥 大纲 / 世界观 / 角色管理…", lambda: self.show_character_dialog(2), "Ctrl+Shift+R", None)
         self._add_action(project_menu, "📐 创作规划（伏笔/章节卡片/体系/剧情线/时间线）", lambda: self._show_planning_dialog(True), "Ctrl+Shift+P", None)
@@ -2267,6 +2268,7 @@ class MainWindow(QMainWindow):
         editor.new_chapter_requested.connect(self.new_chapter)
         editor.chapter_gen_requested.connect(self._show_chapter_gen_dialog)
         editor.author_tool_requested.connect(self._author_tool)
+        editor.name_tool_requested.connect(self._show_name_dialog)
         editor.query_requested.connect(self._query_entity)
         editor.plugin_actions_provider = lambda ed=editor: self.plugin_manager.editor_actions(ed)
         editor.quick_texts_provider = lambda: self.config.get("app", {}).get("quick_texts", [])
@@ -2728,6 +2730,39 @@ class MainWindow(QMainWindow):
                             on_restored=self._refresh_chapter_dock,
                             parent=self)
         dlg.exec()
+
+    def _show_name_dialog(self):
+        """打开取名器（单例，带 AI 与插入回调）。"""
+        if not hasattr(self, "_name_dialog") or self._name_dialog is None:
+            from .dialogs.name_dialog import NameDialog
+            self._name_dialog = NameDialog(
+                self,
+                ai_provider=self._ai_names_provider,
+                genre=self._book_genre(),
+                insert_callback=self._insert_name_to_editor,
+            )
+        dlg = self._name_dialog
+        dlg.genre_combo.setCurrentText(self._book_genre() or "修真")
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _book_genre(self) -> str:
+        try:
+            if self.storage is not None:
+                return self.storage.get_book().genre or ""
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
+
+    def _ai_names_provider(self, prompt: str, done_cb):
+        self.ai_panel.run_task(prompt, done_cb, stream=False)
+
+    def _insert_name_to_editor(self, name: str):
+        editor = self.current_editor()
+        if editor is not None:
+            editor.insertPlainText(name)
+            editor.setFocus()
 
     def _show_planning_dialog(self, focus_chapter: bool = True):
         """打开「📐 创作规划」弹窗（单例，复用上次尺寸/位置）。

@@ -147,49 +147,29 @@ class BookmarkGutter(QWidget):
                 cb(cid, line, name.strip())
 
 
-class _NamePopup(QFrame):
-    """人名自动补全的下拉列表（自建 Popup，避免 QCompleter 崩溃问题）。"""
+class _NamePopup(QMenu):
+    """人名自动补全下拉（用 QMenu：自带键盘导航/外部点击关闭，稳定）。"""
 
     def __init__(self, editor: "EditorWidget"):
-        super().__init__(editor, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        super().__init__(editor)
         self._editor = editor
-        self._prefix = ""
         self.setObjectName("namePopup")
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(2, 2, 2, 2)
-        self.list = QListWidget()
-        self.list.setFixedWidth(150)
-        self.list.itemClicked.connect(self._pick)
-        lay.addWidget(self.list)
         self.setStyleSheet(
-            "QFrame#namePopup{background:#FFFFFF;border:1px solid #C6DCCF;"
-            "border-radius:6px;}"
-            "QListWidget{background:transparent;border:none;}"
-            "QListWidget::item{padding:3px 8px;}"
-            "QListWidget::item:selected{background:#D9F2E5;color:#245A40;}"
+            "QMenu#namePopup{background:#FFFFFF;border:1px solid #C6DCCF;"
+            "border-radius:6px;padding:3px;}"
+            "QMenu#namePopup::item{padding:4px 14px;border-radius:4px;}"
+            "QMenu#namePopup::item:selected{background:#D9F2E5;color:#245A40;}"
         )
 
     def show_for(self, prefix: str, names: list[str], cursor_rect):
-        self._prefix = prefix
-        self.list.clear()
-        self.list.addItems(names)
-        self.list.setCurrentRow(0)
+        self.clear()
+        for n in names:
+            act = self.addAction(n)
+            act.triggered.connect(
+                lambda _=False, nn=n: self._editor._insert_completion(nn))
         gp = self._editor.viewport().mapToGlobal(cursor_rect.bottomLeft())
-        self.move(gp.x(), gp.y() + 4)
-        self.adjustSize()
-        self.show()
+        self.popup(gp + QPoint(0, 4))
         self.raise_()
-
-    def selected(self) -> str:
-        item = self.list.currentItem()
-        return item.text() if item else ""
-
-    def move_selection(self, delta: int):
-        r = self.list.currentRow() + delta
-        self.list.setCurrentRow(max(0, min(self.list.count() - 1, r)))
-
-    def _pick(self, item):
-        self._editor._insert_completion(item.text())
 
 
 class EditorWidget(QTextEdit):
@@ -208,6 +188,7 @@ class EditorWidget(QTextEdit):
     new_chapter_requested = Signal()    # 右键新建章节
     chapter_gen_requested = Signal()    # 右键 AI 生成整章（弹窗输入要求）
     author_tool_requested = Signal(str) # 写后工具：refine=提炼要点 / summary=前情提要 / link=衔接检查
+    name_tool_requested = Signal()      # 取名器
 
     def __init__(self, config: dict, parent=None):
         super().__init__(parent)
@@ -632,24 +613,14 @@ class EditorWidget(QTextEdit):
         key = event.key()
         mods = event.modifiers()
 
-        # A. 补全弹窗打开时的按键（上/下选择，Enter/Tab 插入，Esc 关闭）
+        # A. 补全下拉打开时的按键（QMenu 自带导航，这里仅收尾关闭）
         if self._name_popup.isVisible():
-            if key == Qt.Key_Down:
-                self._name_popup.move_selection(1)
-                return
-            if key == Qt.Key_Up:
-                self._name_popup.move_selection(-1)
-                return
-            if key in (Qt.Key_Enter, Qt.Key_Return, Qt.Key_Tab):
-                name = self._name_popup.selected()
+            if key in (Qt.Key_Enter, Qt.Key_Return, Qt.Key_Escape):
                 self._name_popup.hide()
-                if name:
-                    self._insert_completion(name)
-                return
-            if key == Qt.Key_Escape:
-                self._name_popup.hide()
-                return
-            self._name_popup.hide()
+            else:
+                self._name_popup.hide()   # 其它输入则收起下拉
+                super().keyPressEvent(event)
+            return
 
         # G. 段落操作快捷键
         if mods & Qt.KeyboardModifier.AltModifier and key == Qt.Key_Up:
@@ -728,38 +699,43 @@ class EditorWidget(QTextEdit):
 
     # ---------- G. 段落操作 ----------
     def _move_block(self, delta: int):
-        """整段上移/下移（与相邻段落交换）。"""
-        cursor = self.textCursor()
-        block = cursor.block()
-        target = block.next() if delta > 0 else block.previous()
-        if not target.isValid():
+        """整段上移/下移（与相邻段落交换）。每次操作后重新按序号找块，
+        避免持有被 Qt 重排后失效的块引用（否则偶发内存崩溃）。"""
+        doc = self.document()
+        idx = self.textCursor().block().blockNumber()
+        j = idx + delta
+        if j < 0 or j >= doc.blockCount():
             return
-        a, b = block.text(), target.text()
-        pos = cursor.positionInBlock()
-        cur = QTextCursor(block)
-        cur.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
-        cur.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
-        cur.insertText(b)
-        cur2 = QTextCursor(target)
-        cur2.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
-        cur2.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
-        cur2.insertText(a)
-        # 恢复光标位置（在移动后的块内）
-        block2 = target if delta > 0 else block
-        c = self.textCursor()
-        c.setPosition(block2.position() + min(pos, len(b if delta > 0 else a)))
-        self.setTextCursor(c)
+        t1 = doc.findBlockByNumber(idx).text()
+        t2 = doc.findBlockByNumber(j).text()
+        pos_in = self.textCursor().positionInBlock()
+        # 第 1 段位置写入第 2 段文本
+        c = QTextCursor(doc)
+        b = doc.findBlockByNumber(idx)
+        c.setPosition(b.position())
+        c.setPosition(b.position() + b.length() - 1, QTextCursor.MoveMode.KeepAnchor)
+        c.insertText(t2)
+        # 重新定位后再写第 2 段（块位置已变）
+        b2 = doc.findBlockByNumber(j)
+        c2 = QTextCursor(doc)
+        c2.setPosition(b2.position())
+        c2.setPosition(b2.position() + b2.length() - 1, QTextCursor.MoveMode.KeepAnchor)
+        c2.insertText(t1)
+        target = doc.findBlockByNumber(j)
+        cur = self.textCursor()
+        cur.setPosition(target.position() + min(pos_in, len(t2 if delta > 0 else t1)))
+        self.setTextCursor(cur)
 
     def _delete_block(self):
-        """删除当前整段。"""
-        cursor = self.textCursor()
-        block = cursor.block()
-        c = QTextCursor(block)
-        c.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.KeepAnchor)
-        c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        """删除当前整段（按位置操作，安全）。"""
+        doc = self.document()
+        block = self.textCursor().block()
+        c = QTextCursor(doc)
+        c.setPosition(block.position())
+        c.setPosition(block.position() + block.length() - 1, QTextCursor.MoveMode.KeepAnchor)
         c.removeSelectedText()
         if c.atBlockEnd() and c.block().next().isValid():
-            c.deleteChar()   # 删掉段尾换行
+            c.deleteChar()
         self.setTextCursor(c)
 
     def _split_block(self):
@@ -1082,6 +1058,7 @@ class EditorWidget(QTextEdit):
         menu.addAction("🔗 检查章节衔接", lambda: self.author_tool_requested.emit("link"))
         menu.addSeparator()
         menu.addAction("📐 段落整理（缩进/空行/标点）", self.format_paragraphs)
+        menu.addAction("📛 取名器…", self.name_tool_requested.emit)
         tw = menu.addAction("⌨ 打字机模式（当前行居中）", self._toggle_typewriter)
         tw.setCheckable(True)
         tw.setChecked(bool(self.config.get("editor", {}).get("typewriter", False)))
