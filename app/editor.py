@@ -159,6 +159,7 @@ class EditorWidget(QTextEdit):
     voice_input_requested = Signal()    # 语音输入
     new_chapter_requested = Signal()    # 右键新建章节
     chapter_gen_requested = Signal()    # 右键 AI 生成整章（弹窗输入要求）
+    author_tool_requested = Signal(str) # 写后工具：refine=提炼要点 / summary=前情提要 / link=衔接检查
 
     def __init__(self, config: dict, parent=None):
         super().__init__(parent)
@@ -805,6 +806,10 @@ class EditorWidget(QTextEdit):
         menu.addAction("➕ AI 扩充", lambda: self.ai_action_requested.emit("expand"))
         menu.addAction("✍️ AI 续写", lambda: self.ai_action_requested.emit("continue"))
         menu.addAction("✂️ AI 精简", lambda: self.ai_action_requested.emit("condense"))
+        menu.addSeparator()
+        menu.addAction("📋 提炼本章要点", lambda: self.author_tool_requested.emit("refine"))
+        menu.addAction("📖 前情提要…", lambda: self.author_tool_requested.emit("summary"))
+        menu.addAction("🔗 检查章节衔接", lambda: self.author_tool_requested.emit("link"))
         menu.addSeparator()
         menu.addAction("🔖 添加/取消书签（当前行）", self._toggle_bookmark_current)
         menu.addAction("⌨ AI 写作输入…", self.write_requested.emit)

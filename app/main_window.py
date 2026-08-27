@@ -924,6 +924,135 @@ class MainWindow(QMainWindow):
             lambda text, err, ed=editor, hs=has_selection, m=mode: self._apply_ai_result(ed, text, err, m, hs),
         )
 
+    # ---------- 写后工具（提炼/前情/衔接） ----------
+    def _author_tool(self, mode: str):
+        editor = self.current_editor()
+        if editor is None or self.storage is None:
+            QMessageBox.information(self, "提示", "请先打开一个章节。")
+            return
+        if mode == "refine":
+            self._refine_chapter(editor)
+        elif mode == "summary":
+            self._show_prev_summary()
+        elif mode == "link":
+            self._check_chapter_link()
+
+    def _refine_chapter(self, editor):
+        """B：提炼本章要点 → 回填章节卡片（AI 优先，失败用规则版）。"""
+        cid = getattr(editor, "chapter_id", None)
+        if not cid:
+            QMessageBox.information(self, "提炼要点", "当前章节尚未保存到项目。")
+            return
+        from .consistency_check import ai_refine_prompt, extract_chapter_rules, parse_refine_result
+        text = editor.content().strip()
+        if not text:
+            return
+        ch = self.storage.get_chapter(cid)
+        if ch is None:
+            return
+        self.log(f"正在提炼《{ch.title}》要点…", "info")
+
+        def done(result: dict):
+            # 写入/更新该章卡片
+            from .models import ChapterCard
+            card = next((x for x in self.storage.list_chapter_cards()
+                         if x.chapter_id == cid), None)
+            if card is None:
+                card = ChapterCard(book_id=self.storage.get_book().id, chapter_id=cid,
+                                   title=ch.title)
+            if result.get("goal"):
+                card.goal = result["goal"]
+            if result.get("conflict"):
+                card.conflict = result["conflict"]
+            if result.get("hook"):
+                card.hook = result["hook"]
+            if result.get("characters"):
+                card.characters = result["characters"].replace("，", ",")
+            if result.get("foreshadows"):
+                card.foreshadows = result["foreshadows"]
+            if card.id:
+                self.storage.update_chapter_card(card)
+            else:
+                card.id = self.storage.add_chapter_card(card)
+            self._refresh_snap()
+            self.log("已回填《%s》的章节卡片" % ch.title, "ok")
+            QMessageBox.information(
+                self, "提炼完成",
+                "已写入章节卡片：\n目标：%s\n冲突：%s\n钩子：%s\n出场人物：%s"
+                % (result.get("goal") or "（无）", result.get("conflict") or "（无）",
+                   result.get("hook") or "（无）", result.get("characters") or "（无）"))
+
+        def on_ai(text_ai, err):
+            if err or not text_ai:
+                done(extract_chapter_rules(self.storage, cid))   # 规则兜底
+            else:
+                done(parse_refine_result(text_ai))
+
+        self.ai_panel.run_task(ai_refine_prompt(ch.title, text), on_ai, stream=False)
+
+    def _show_prev_summary(self):
+        """C：前情提要——AI 生成最近几章结尾摘要。"""
+        if self.storage is None:
+            return
+        from .consistency_check import ai_summary_prompt, chapter_tail
+        editor = self.current_editor()
+        cid = getattr(editor, "chapter_id", None)
+        chs = sorted(self.storage.list_chapters(), key=lambda c: (c.order, c.id))
+        idx = next((i for i, c in enumerate(chs) if c.id == cid), None)
+        if idx is None or idx == 0:
+            QMessageBox.information(self, "前情提要", "这是第一章，没有前情。")
+            return
+        tails = []
+        for c in chs[max(0, idx - 3):idx]:
+            tails.append((c.title, chapter_tail(c.content)))
+        if not tails:
+            return
+        self._show_result_dialog("📖 前情提要", ai_summary_prompt(self._book_title(), tails))
+
+    def _check_chapter_link(self):
+        """F：衔接检查——上章结尾与本章开头的重复/断裂。"""
+        if self.storage is None:
+            return
+        from .consistency_check import (ai_link_prompt, chapter_tail, link_check_rule)
+        editor = self.current_editor()
+        cid = getattr(editor, "chapter_id", None)
+        chs = sorted(self.storage.list_chapters(), key=lambda c: (c.order, c.id))
+        idx = next((i for i, c in enumerate(chs) if c.id == cid), None)
+        if idx is None or idx == 0:
+            QMessageBox.information(self, "衔接检查", "这是第一章，没有上一章。")
+            return
+        prev = chs[idx - 1]
+        cur = chs[idx]
+        prev_tail = chapter_tail(prev.content)
+        cur_head = (editor.content() or "").strip()[:400] if editor is not None else ""
+        rules = link_check_rule(prev_tail, cur_head)
+        if rules:
+            QMessageBox.information(self, "衔接检查", "\n".join(rules))
+            return
+        self._show_result_dialog(
+            "🔗 衔接检查", ai_link_prompt(prev.title, prev_tail, cur.title, cur_head))
+
+    def _show_result_dialog(self, title: str, prompt: str):
+        """通用：AI 生成结果显示在弹窗。"""
+        from .dialog_base import GradientDialog
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        class _ResultDialog(GradientDialog):
+            def __init__(self, parent, t, p):
+                super().__init__(t, parent, resizable=True)
+                self.setMinimumSize(460, 300)
+                self.view = QPlainTextEdit()
+                self.view.setReadOnly(True)
+                self.view.setPlaceholderText("⏳ 生成中…")
+                self.body.addWidget(self.view, 1)
+
+        dlg = _ResultDialog(self, title, prompt)
+        dlg.show()
+        self.ai_panel.run_task(prompt,
+                               lambda text, err: (dlg.view.setPlainText(
+                                   (text or "").strip() if not err else f"[错误] {err}")),
+                               stream=False)
+
     def _apply_ai_result(self, editor, text, err, mode, has_selection):
         if err:
             QMessageBox.warning(self, "AI 处理失败", err)
@@ -1291,6 +1420,12 @@ class MainWindow(QMainWindow):
         self.check_view.set_words(words)
         self.bottom_tabs.addTab(self.check_view, "🕵️ 检查")
 
+        # 底部：全书一致性 / 角色出场
+        from .consistency_view import ConsistencyView
+        self.consistency_view = ConsistencyView()
+        self.consistency_view.open_requested.connect(lambda cid, ln: self.open_chapter(cid))
+        self.bottom_tabs.addTab(self.consistency_view, "🔗 一致性")
+
         # 底部：番茄钟
         self.pomodoro_view = PomodoroView()
         self.pomodoro_view.log_requested.connect(lambda msg, lvl: self.log(msg, lvl))
@@ -1448,39 +1583,68 @@ class MainWindow(QMainWindow):
         dlg = QuoteSearchDialog(self)
         dlg.exec()
 
+    @staticmethod
+    def _emoji_icon(ch: str, size: int = 16) -> "QIcon":
+        """把 emoji 渲染成 QIcon（与菜单 action 的 emoji 配套，彩色显示）。"""
+        from PySide6.QtGui import QIcon, QPainter, QPixmap
+        pm = QPixmap(size, size)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        f = p.font()
+        f.setPixelSize(int(size * 0.82))
+        p.setFont(f)
+        p.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, ch)
+        p.end()
+        return QIcon(pm)
+
     def _build_quick_toolbar(self):
-        """顶栏下方快捷工具栏：一排设定弹窗入口，只显示图标（悬停有说明）。"""
+        """顶栏下方快捷工具栏：一排设定弹窗入口，只显示图标（悬停有说明）。
+        图标用与菜单 action 配套的 emoji，按类别用分隔线分组。"""
         from PySide6.QtCore import QSize
         from PySide6.QtWidgets import QToolBar
         tb = QToolBar("快捷工具", self)
         tb.setObjectName("quickToolBar")
         tb.setMovable(False)
         tb.setFloatable(False)
-        tb.setIconSize(QSize(20, 20))
+        tb.setIconSize(QSize(16, 16))   # 图标小一点
         tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         tb.setStyleSheet(
-            "QToolBar{background:transparent;border:none;spacing:2px;padding:2px 4px;}"
-            "QToolBar QToolButton{background:transparent;border-radius:6px;padding:3px;}"
+            "QToolBar{background:transparent;border:none;spacing:2px;padding:1px 4px;}"
+            "QToolBar QToolButton{background:transparent;border-radius:5px;padding:2px;}"
             "QToolBar QToolButton:hover{background:rgba(128,128,128,40);}"
+            "QToolBar::separator{background:rgba(128,128,128,90);width:1px;margin:4px 3px;}"
         )
-        st = self.style()
 
-        def add(text: str, slot, pixmap) -> None:
+        def add(text: str, slot, emoji: str) -> None:
             a = QAction(text, self)
-            a.setIcon(st.standardIcon(pixmap))
+            a.setIcon(self._emoji_icon(emoji))
             a.setToolTip(text)
             a.triggered.connect(slot)
             tb.addAction(a)
 
-        SP = QStyle.StandardPixmap
-        add("章节管理…", self.show_chapter_dialog, SP.SP_FileIcon)
-        add("大纲 / 世界观 / 角色管理…", lambda: self.show_character_dialog(2), SP.SP_DirOpenIcon)
-        add("创作规划…", lambda: self._show_planning_dialog(True), SP.SP_FileDialogListView)
-        add("本章速览", lambda: (self.snap_dock.show(), self.snap_dock.raise_()), SP.SP_FileDialogInfoView)
-        add("备份项目…", self.backup_project, SP.SP_DialogSaveButton)
-        add("从备份恢复…", self.restore_backup, SP.SP_ArrowBack)
-        add("全文查找…", self.show_fulltext_search, SP.SP_FileDialogContentsView)
-        add("设置…", lambda: self.show_settings_dialog(), SP.SP_FileDialogDetailedView)
+        def sep():
+            tb.addSeparator()
+
+        # 章节与设定
+        add("🗂 章节管理…", self.show_chapter_dialog, "🗂")
+        add("👥 大纲 / 世界观 / 角色管理…", lambda: self.show_character_dialog(2), "👥")
+        add("📐 创作规划…", lambda: self._show_planning_dialog(True), "📐")
+        sep()
+        # 写作辅助
+        add("📋 本章速览", lambda: (self.snap_dock.show(), self.snap_dock.raise_()), "📋")
+        add("🪟 速览悬浮窗", self._toggle_snap_float, "🪟")
+        add("🔗 一致性检查", lambda: self._activate_bottom_tab(self.consistency_view), "🔗")
+        sep()
+        # 数据安全
+        add("💾 备份项目…", self.backup_project, "💾")
+        add("♻️ 从备份恢复…", self.restore_backup, "♻️")
+        sep()
+        # 工具
+        add("🔍 全文查找…", self.show_fulltext_search, "🔍")
+        add("ℹ️ 项目信息…", self.show_project_info_dialog, "ℹ️")
+        sep()
+        add("⚙️ 设置…", lambda: self.show_settings_dialog(), "⚙️")
         self.quick_toolbar = tb
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
 
@@ -1766,6 +1930,8 @@ class MainWindow(QMainWindow):
         self.goal_view.set_storage(storage)
         self.bookmarks_view.set_storage(storage)
         self.check_view.set_storage(storage)
+        if hasattr(self, "consistency_view"):
+            self.consistency_view.set_storage(storage)
         self.outline_view.set_storage(storage)
         self.overview_view.set_storage(storage)
         self._refresh_chapter_dock()
@@ -1792,6 +1958,8 @@ class MainWindow(QMainWindow):
         self.goal_view.set_storage(None)
         self.bookmarks_view.set_storage(None)
         self.check_view.set_storage(None)
+        if hasattr(self, "consistency_view"):
+            self.consistency_view.set_storage(None)
         self.outline_view.set_storage(None)
         self.overview_view.set_storage(None)
         # 回到欢迎页
@@ -2029,6 +2197,7 @@ class MainWindow(QMainWindow):
         editor.voice_input_requested.connect(self.show_voice_input_dialog)
         editor.new_chapter_requested.connect(self.new_chapter)
         editor.chapter_gen_requested.connect(self._show_chapter_gen_dialog)
+        editor.author_tool_requested.connect(self._author_tool)
         editor.query_requested.connect(self._query_entity)
         editor.plugin_actions_provider = lambda ed=editor: self.plugin_manager.editor_actions(ed)
         editor.quick_texts_provider = lambda: self.config.get("app", {}).get("quick_texts", [])

@@ -7,7 +7,7 @@ from datetime import date
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+    QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
     QSpinBox, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -146,6 +146,8 @@ class NotesView(QWidget):
 
         self.list_widget = QListWidget()
         self.list_widget.currentItemChanged.connect(self._on_select)
+        self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list_widget.customContextMenuRequested.connect(self._context_menu)
         layout.addWidget(self.list_widget, 1)
 
         self.editor = QPlainTextEdit()
@@ -189,6 +191,65 @@ class NotesView(QWidget):
         if note:
             self.current_id = note.id
             self.editor.setPlainText(note.text)
+
+    # ---------- 一键归位：便签 → 设定 ----------
+    def _context_menu(self, pos):
+        item = self.list_widget.itemAt(pos)
+        if item is None or not self.storage:
+            return
+        note = self.storage.get_note(item.data(0x0100))
+        if note is None:
+            return
+        menu = QMenu(self)
+        menu.addAction("🧬 转为角色设定", lambda: self._to_character(note.text))
+        menu.addAction("🪝 转为伏笔", lambda: self._to_foreshadow(note.text))
+        menu.addAction("📇 转为章节卡片", lambda: self._to_card(note.text))
+        menu.addAction("📈 转为剧情线节点", lambda: self._to_storyline(note.text))
+        menu.exec(self.list_widget.mapToGlobal(pos))
+
+    def _split_first(self, text: str) -> tuple[str, str]:
+        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        return (lines[0] if lines else "未命名"), text.strip()
+
+    def _to_character(self, text):
+        from .models import Character
+        name, rest = self._split_first(text)
+        c = Character(book_id=self.storage.get_book().id, name=name[:20],
+                      role="配角", notes=rest)
+        c.id = self.storage.add_character(c)
+        QMessageBox.information(self, "已归位", f"灵感已转为角色：{name}")
+
+    def _to_foreshadow(self, text):
+        from .models import Foreshadow
+        name, rest = self._split_first(text)
+        f = Foreshadow(book_id=self.storage.get_book().id, name=name[:30],
+                       desc=rest, status="待埋")
+        f.id = self.storage.add_foreshadow(f)
+        QMessageBox.information(self, "已归位", f"灵感已转为伏笔：{name}")
+
+    def _to_card(self, text):
+        from .models import ChapterCard
+        name, rest = self._split_first(text)
+        card = ChapterCard(book_id=self.storage.get_book().id, title=name[:40],
+                           notes=rest)
+        card.id = self.storage.add_chapter_card(card)
+        QMessageBox.information(self, "已归位", f"灵感已转为章节卡片：{name}")
+
+    def _to_storyline(self, text):
+        from .models import StorylineLine, StorylineNode
+        lines = self.storage.list_storyline_lines()
+        if lines:
+            line = lines[0]
+        else:
+            line = StorylineLine(book_id=self.storage.get_book().id,
+                                 name="灵感线", order=1)
+            line.id = self.storage.add_storyline_line(line)
+        name, rest = self._split_first(text)
+        node = StorylineNode(book_id=self.storage.get_book().id, line_id=line.id,
+                             title=name[:40], detail=rest,
+                             order=self.storage.max_storyline_node_order(line.id) + 1)
+        node.id = self.storage.add_storyline_node(node)
+        QMessageBox.information(self, "已归位", f"灵感已转为剧情线节点：{name}（{line.name}）")
 
     def _new(self):
         if not self.storage:
