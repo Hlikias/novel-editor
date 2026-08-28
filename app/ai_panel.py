@@ -11,8 +11,8 @@ import urllib.request
 
 from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
-    QPushButton, QSplitter, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+    QPlainTextEdit, QPushButton, QSplitter, QVBoxLayout, QWidget,
 )
 
 # 常见"模型名别名" → 规范模型名（用户常把服务名当作模型名填写，
@@ -157,6 +157,13 @@ class AIPanel(QWidget):
         info.setObjectName("mutedLabel")
         layout.addWidget(info)
 
+        # 技能选择（设置 → 技能 中管理；此处选择本次对话使用的技能）
+        self.skill_combo = QComboBox()
+        self.skill_combo.setObjectName("aiSkillCombo")
+        self._skills = [dict(s) for s in (config.get("skills") or [])]
+        self._reload_skill_combo()
+        layout.addWidget(self.skill_combo)
+
         # 提示词
         prompt_box = QGroupBox("提示词")
         prompt_layout = QVBoxLayout(prompt_box)
@@ -226,6 +233,35 @@ class AIPanel(QWidget):
             Qt.Orientation.Horizontal if bottom_like else Qt.Orientation.Vertical
         )
 
+    # ---------- 技能 / 身份 ----------
+    def _reload_skill_combo(self):
+        self.skill_combo.blockSignals(True)
+        self.skill_combo.clear()
+        self.skill_combo.addItem("（无技能）", None)
+        for s in self._skills:
+            self.skill_combo.addItem(s.get("name") or "未命名技能", s)
+        self.skill_combo.blockSignals(False)
+
+    def _selected_skill(self) -> dict | None:
+        data = self.skill_combo.currentData()
+        return data if isinstance(data, dict) else None
+
+    def _build_system_prompt(self) -> str:
+        """组合系统提示：默认 system_prompt + 选中技能指令 + 作者身份（供 AI 参考）。"""
+        parts = [self.config.get("api", {}).get("system_prompt", "") or ""]
+        skill = self._selected_skill()
+        if skill and (skill.get("system_prompt") or "").strip():
+            parts.append(skill["system_prompt"].strip())
+        ident = self.config.get("identity") or {}
+        if any(str(v).strip() for v in ident.values()):
+            labels = {"pen_name": "笔名", "bio": "简介", "preferences": "写作偏好",
+                      "contact": "联系方式", "works": "作品"}
+            bits = [f"{labels.get(k, k)}：{str(v).strip()}"
+                    for k, v in ident.items() if str(v).strip()]
+            if bits:
+                parts.append("【作者身份（写作时参考）】" + "；".join(bits))
+        return "\n".join(p for p in parts if p.strip())
+
     # ---------- 行为 ----------
     def _privacy_blocked(self) -> str:
         """隐私保护：严格模式/未开启 AI 联网时返回提示，否则返回空串。"""
@@ -274,7 +310,7 @@ class AIPanel(QWidget):
         self._worker = AICallWorker(
             base_url, api_key, model,
             float(api_cfg.get("temperature", 0.7)),
-            api_cfg.get("system_prompt", ""), prompt,
+            self._build_system_prompt(), prompt,
             stream=self.stream_check.isChecked(),
             parent=self,
         )
@@ -319,7 +355,7 @@ class AIPanel(QWidget):
         self._worker = AICallWorker(
             base_url, api_key, model,
             float(api_cfg.get("temperature", 0.7)),
-            api_cfg.get("system_prompt", ""), prompt,
+            self._build_system_prompt(), prompt,
             stream=stream,
             parent=self,
         )
@@ -420,3 +456,5 @@ class AIPanel(QWidget):
         self.status_label.setText(
             f"模型：{api_cfg.get('model', '-')} ｜ 接口：{api_cfg.get('base_url', '-')}"
         )
+        self._skills = [dict(s) for s in (config.get("skills") or [])]
+        self._reload_skill_combo()

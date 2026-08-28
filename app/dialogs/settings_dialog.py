@@ -1,19 +1,67 @@
 # -*- coding: utf-8 -*-
-"""设置弹窗：API 设置、编辑器设置、关于。"""
+"""设置弹窗：API 设置、编辑器设置、技能、作者身份、关于。"""
 from __future__ import annotations
+
+import json
+import os
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout,
-    QKeySequenceEdit, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QPlainTextEdit, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
-    QTabWidget, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout,
+    QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox,
+    QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from ..config import save_config
 from ..dialog_base import GradientDialog, wrap_in_scroll
 from ..theme import THEME_NAMES
+
+# 内置技能预设：name → {name, description, system_prompt, user_prompt, examples}
+SKILL_PRESETS: dict[str, dict] = {
+    "散文家": {
+        "name": "散文家",
+        "description": "以散文笔法写作，注重语言美感与意境",
+        "system_prompt": "你是一位深谙中文散文之道的作家。写作时注重语言的美感、节奏与意境，"
+                         "善用比喻与细节，避免空泛口号；句式长短错落，结尾留有余味。",
+        "user_prompt": "",
+        "examples": "",
+    },
+    "论文润色": {
+        "name": "论文润色",
+        "description": "学术/议论文润色，使表达严谨、条理清晰",
+        "system_prompt": "你是一位严谨的学术编辑。润色时保持原意与论证结构，"
+                         "修正语病与冗余表达，使语句严谨、术语准确、逻辑连贯；"
+                         "不使用口语化或情绪化词汇，不使用夸大表述。",
+        "user_prompt": "",
+        "examples": "",
+    },
+    "网文写手": {
+        "name": "网文写手",
+        "description": "网络小说风格：节奏快、爽点足、口语化",
+        "system_prompt": "你是一位资深中文网络小说作者。行文节奏明快，爽点密集，"
+                         "对话自然口语化，善于制造悬念与反转；分段短小，适配手机阅读。",
+        "user_prompt": "",
+        "examples": "",
+    },
+    "古诗文风": {
+        "name": "古诗文风",
+        "description": "带有古典诗文韵味的写作风格",
+        "system_prompt": "你擅长融入古典诗文气韵的中文写作。用词凝练典雅，善化用典故，"
+                         "讲究对仗与韵律感；写景抒情相生，不堆砌辞藻。",
+        "user_prompt": "",
+        "examples": "",
+    },
+    "儿童文学": {
+        "name": "儿童文学",
+        "description": "面向儿童的讲故事风格：亲切、易懂、有趣",
+        "system_prompt": "你是一位儿童文学作家。语言亲切易懂，句子简短，"
+                         "善用拟人与比喻，情节充满想象力与趣味，传递积极价值观。",
+        "user_prompt": "",
+        "examples": "",
+    },
+}
 
 
 class SettingsDialog(GradientDialog):
@@ -357,6 +405,91 @@ class SettingsDialog(GradientDialog):
         self._load_quick(config.get("app", {}).get("quick_texts", []))
         self.tabs.addTab(quick_tab, "⚡ 快捷文本")
 
+        # ---------- 技能 ----------
+        skills_tab = QWidget()
+        sk_lay = QVBoxLayout(skills_tab)
+        self._skills: list[dict] = [dict(s) for s in (config.get("skills") or [])]
+        skhint = QLabel(
+            "技能 = AI 角色/风格预设。写作时在「AI 写作助手」顶部选择，AI 按该技能的指令工作。\n"
+            "支持从 .json / .skill 文件导入（格式见“导入技能”按钮提示）。"
+        )
+        skhint.setWordWrap(True)
+        skhint.setObjectName("mutedLabel")
+        sk_lay.addWidget(skhint)
+        sk_row = QHBoxLayout()
+        self.skill_list = QListWidget()
+        self.skill_list.currentRowChanged.connect(self._load_skill)
+        sk_row.addWidget(self.skill_list, 1)
+        sk_edit = QWidget()
+        sk_form = QFormLayout(sk_edit)
+        sk_form.setLabelAlignment(sk_form.labelAlignment())
+        self.skill_name_edit = QLineEdit()
+        self.skill_desc_edit = QLineEdit()
+        self.skill_sys_edit = QPlainTextEdit()
+        self.skill_sys_edit.setFixedHeight(90)
+        self.skill_user_edit = QLineEdit()
+        self.skill_ex_edit = QPlainTextEdit()
+        self.skill_ex_edit.setFixedHeight(70)
+        sk_form.addRow("名称", self.skill_name_edit)
+        sk_form.addRow("描述", self.skill_desc_edit)
+        sk_form.addRow("系统指令", self.skill_sys_edit)
+        sk_form.addRow("用户指令(可选)", self.skill_user_edit)
+        sk_form.addRow("示例(可选)", self.skill_ex_edit)
+        sk_row.addWidget(sk_edit, 2)
+        sk_lay.addLayout(sk_row)
+        sk_btns = QHBoxLayout()
+        self.skill_preset_combo = QComboBox()
+        self.skill_preset_combo.addItems(list(SKILL_PRESETS.keys()))
+        add_preset_btn = QPushButton("➕ 添加预设")
+        add_preset_btn.clicked.connect(self._add_skill_preset)
+        import_btn = QPushButton("📂 导入技能…")
+        import_btn.clicked.connect(self._import_skill)
+        save_skill_btn = QPushButton("💾 保存当前技能")
+        save_skill_btn.clicked.connect(self._save_current_skill)
+        del_skill_btn = QPushButton("🗑 删除")
+        del_skill_btn.clicked.connect(self._delete_skill)
+        sk_btns.addWidget(self.skill_preset_combo)
+        sk_btns.addWidget(add_preset_btn)
+        sk_btns.addWidget(import_btn)
+        sk_btns.addWidget(save_skill_btn)
+        sk_btns.addWidget(del_skill_btn)
+        sk_btns.addStretch(1)
+        sk_lay.addLayout(sk_btns)
+        self.tabs.addTab(skills_tab, "🧠 技能")
+        self._reload_skill_list()
+
+        # ---------- 作者身份 ----------
+        id_tab = QWidget()
+        id_form = QFormLayout(id_tab)
+        id_form.setLabelAlignment(id_form.labelAlignment())
+        self.identity = dict(config.get("identity") or {})
+        self.pen_edit = QLineEdit(self.identity.get("pen_name", ""))
+        self.pen_edit.setPlaceholderText("作者笔名 / 署名")
+        self.bio_edit = QPlainTextEdit(self.identity.get("bio", ""))
+        self.bio_edit.setFixedHeight(60)
+        self.pref_edit = QPlainTextEdit(self.identity.get("preferences", ""))
+        self.pref_edit.setFixedHeight(60)
+        self.pref_edit.setPlaceholderText("如：擅长散文与短篇小说，偏好第一人称与细腻心理描写…")
+        self.contact_edit = QLineEdit(self.identity.get("contact", ""))
+        self.contact_edit.setPlaceholderText("邮箱 / 社交账号（可选，敏感信息请谨慎填写）")
+        self.works_edit = QPlainTextEdit(self.identity.get("works", ""))
+        self.works_edit.setFixedHeight(60)
+        self.works_edit.setPlaceholderText("代表作/作品列表（每行一部，可选）")
+        id_form.addRow("笔名", self.pen_edit)
+        id_form.addRow("作者简介", self.bio_edit)
+        id_form.addRow("写作偏好", self.pref_edit)
+        id_form.addRow("联系方式", self.contact_edit)
+        id_form.addRow("作品", self.works_edit)
+        idpriv = QLabel(
+            "🔒 隐私说明：身份信息仅保存在本地（~/.novel_editor/config.json）。\n"
+            "保存时会再次确认；仅在你允许的 AI 写作任务中随请求发送给 AI 服务，"
+            "严格隐私模式下 AI 被禁用、不会发送。"
+        )
+        idpriv.setWordWrap(True)
+        idpriv.setObjectName("mutedLabel")
+        id_form.addRow("", idpriv)
+        self.tabs.addTab(id_tab, "🪪 作者身份")
+
         # ---------- 关于 ----------
         about_tab = QWidget()
         about_layout = QVBoxLayout(about_tab)
@@ -391,6 +524,114 @@ class SettingsDialog(GradientDialog):
         btn_row.addWidget(save_btn)
         btn_row.addWidget(cancel_btn)
         layout.addLayout(btn_row)
+
+    # ---------- 技能 ----------
+    def _reload_skill_list(self):
+        self.skill_list.blockSignals(True)
+        self.skill_list.clear()
+        for s in self._skills:
+            item = QListWidgetItem(s.get("name") or "未命名技能")
+            item.setToolTip(s.get("description") or "")
+            self.skill_list.addItem(item)
+        self.skill_list.blockSignals(False)
+        if self._skills:
+            self.skill_list.setCurrentRow(0)
+            self._load_skill(0)
+        else:
+            self.skill_name_edit.clear()
+            self.skill_desc_edit.clear()
+            self.skill_sys_edit.clear()
+            self.skill_user_edit.clear()
+            self.skill_ex_edit.clear()
+
+    def _load_skill(self, row: int):
+        if row < 0 or row >= len(self._skills):
+            return
+        s = self._skills[row]
+        self.skill_name_edit.setText(s.get("name", ""))
+        self.skill_desc_edit.setText(s.get("description", ""))
+        self.skill_sys_edit.setPlainText(s.get("system_prompt", ""))
+        self.skill_user_edit.setText(s.get("user_prompt", ""))
+        self.skill_ex_edit.setPlainText(s.get("examples", ""))
+
+    def _collect_skill(self) -> dict:
+        return {
+            "name": self.skill_name_edit.text().strip(),
+            "description": self.skill_desc_edit.text().strip(),
+            "system_prompt": self.skill_sys_edit.toPlainText().strip(),
+            "user_prompt": self.skill_user_edit.text().strip(),
+            "examples": self.skill_ex_edit.toPlainText().strip(),
+        }
+
+    def _save_current_skill(self):
+        s = self._collect_skill()
+        if not s["name"]:
+            QMessageBox.information(self, "提示", "技能名称不能为空")
+            return
+        if not s["system_prompt"] and not s["user_prompt"]:
+            QMessageBox.information(self, "提示", "系统指令或用户指令至少填写一项")
+            return
+        row = self.skill_list.currentRow()
+        if 0 <= row < len(self._skills):
+            self._skills[row] = s
+        else:
+            self._skills.append(s)
+        self._reload_skill_list()
+        for i, item in enumerate(self._skills):
+            if item.get("name") == s["name"]:
+                self.skill_list.setCurrentRow(i)
+                break
+
+    def _add_skill_preset(self):
+        key = self.skill_preset_combo.currentText()
+        preset = SKILL_PRESETS.get(key)
+        if not preset:
+            return
+        self._skills.append(dict(preset))
+        self._reload_skill_list()
+
+    def _delete_skill(self):
+        row = self.skill_list.currentRow()
+        if 0 <= row < len(self._skills):
+            self._skills.pop(row)
+            self._reload_skill_list()
+
+    def _import_skill(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "导入技能", os.path.expanduser("~"),
+            "技能文件 (*.json *.skill);;所有文件 (*)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            items = data if isinstance(data, list) else [data]
+            added = 0
+            for it in items:
+                if not isinstance(it, dict) or not str(it.get("name", "")).strip():
+                    continue
+                if not (str(it.get("system_prompt", "")).strip()
+                        or str(it.get("user_prompt", "")).strip()):
+                    continue
+                self._skills.append({
+                    "name": str(it["name"]).strip(),
+                    "description": str(it.get("description", "")).strip(),
+                    "system_prompt": str(it.get("system_prompt", "")).strip(),
+                    "user_prompt": str(it.get("user_prompt", "")).strip(),
+                    "examples": str(it.get("examples", "")).strip(),
+                })
+                added += 1
+            if added:
+                self._reload_skill_list()
+                QMessageBox.information(self, "导入技能", f"成功导入 {added} 个技能")
+            else:
+                QMessageBox.warning(
+                    self, "导入技能",
+                    "文件中没有可用的技能（需要 name，且 system_prompt 或 user_prompt 至少一项）",
+                )
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "导入失败", f"无法解析技能文件：\n{e}")
 
     def _save(self):
         api = self.config.setdefault("api", {})
@@ -448,6 +689,33 @@ class SettingsDialog(GradientDialog):
 
         # 快捷文本
         app["quick_texts"] = self._quick_items()
+
+        # 技能
+        self.config["skills"] = [s for s in self._skills if s.get("name")]
+
+        # 作者身份（隐私：与旧值不同且非空时弹确认框）
+        new_identity = {
+            "pen_name": self.pen_edit.text().strip(),
+            "bio": self.bio_edit.toPlainText().strip(),
+            "preferences": self.pref_edit.toPlainText().strip(),
+            "contact": self.contact_edit.text().strip(),
+            "works": self.works_edit.toPlainText().strip(),
+        }
+        old_identity = self.config.get("identity") or {}
+        if any(v for v in new_identity.values()) and new_identity != old_identity:
+            if QMessageBox.question(
+                self, "作者身份隐私确认",
+                "🔒 以下身份信息将仅保存在本地（~/.novel_editor/config.json），"
+                "并在你允许的 AI 写作任务中随请求发送给 AI 服务：\n\n"
+                + "\n".join(f"· {k}：{v}" for k, v in new_identity.items() if v) +
+                "\n\n是否确认保存？（可随时在设置中修改或清空）",
+            ) == QMessageBox.StandardButton.Yes:
+                self.config["identity"] = new_identity
+            else:
+                self.config["identity"] = old_identity
+        elif not any(v for v in new_identity.values()) and old_identity:
+            # 用户清空身份：直接清空（不再发送，无需确认）
+            self.config["identity"] = {}
 
         save_config(self.config)
         if self.on_apply:

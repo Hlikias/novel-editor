@@ -618,6 +618,7 @@ class MainWindow(QMainWindow):
         self._add_action(theme_menu, "自定义颜色…", self.show_color_dialog, None, None)
         help_menu.addSeparator()
         self._add_action(help_menu, "⌨ 快捷键一览", self.show_shortcuts, None, None)
+        self._add_action(help_menu, "📜 免责声明", self.show_disclaimer, None, None)
         self._add_action(help_menu, "关于", self.show_about, None, None)
         help_menu.addSeparator()
         self._add_action(help_menu, "🧩 打开插件目录…", self._open_plugin_dir, None, None)
@@ -3404,6 +3405,22 @@ class MainWindow(QMainWindow):
             "<p>功能：VSCode 式编辑器（首行缩进 / 自动换行 / GBK）、"
             "章节管理、角色/武器/属性设定、AI 辅助写作。</p>",
         )
+
+    def show_disclaimer(self):
+        """帮助 → 免责声明。"""
+        text = (
+            "📜 免责声明\n\n"
+            "1. 本软件仅供个人写作辅助使用，作者不对使用本软件产生的任何后果负责。\n\n"
+            "2. AI 生成内容由第三方大模型服务提供，可能存在事实错误、观点偏差或\n"
+            "   不符合预期的内容，仅供参考与灵感启发；发表前请自行核对与修改。\n\n"
+            "3. 使用 AI 功能（联网写作、云端语音识别等）时，相关文本会发送到你\n"
+            "   配置的 AI 服务，请勿输入涉密或不愿外传的内容；可在「设置 → 隐私」\n"
+            "   中开启严格隐私模式以完全禁用联网功能。\n\n"
+            "4. 你在本软件中创作的作品版权归你本人所有；请遵守相关法律法规，\n"
+            "   不利用本软件从事侵权、造谣、诈骗等违法活动。\n\n"
+            "5. 软件按“现状”提供，不承诺任何明示或默示的担保。"
+        )
+        QMessageBox.information(self, "免责声明", text)
 
     def show_shortcuts(self):
         text = (

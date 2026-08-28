@@ -1,0 +1,137 @@
+# -*- coding: utf-8 -*-
+"""技能(Skill)系统 + 作者身份 + 免责声明 测试：
+设置弹窗技能页（预设/保存/导入/删除）、身份隐私确认保存、AI 面板技能下拉与身份注入、
+帮助菜单免责声明。"""
+import json
+import os
+import sys
+import tempfile
+
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from PySide6.QtWidgets import QApplication, QMessageBox
+
+QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok)
+QMessageBox.warning = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok)
+QMessageBox.critical = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok)
+
+import app.main_window as _mw
+_mw.save_config = lambda cfg: None
+import app.dialogs.settings_dialog as _sd
+_sd.save_config = lambda cfg: None   # 不写真实配置
+from app.main_window import MainWindow
+from app.dialogs.settings_dialog import SettingsDialog, SKILL_PRESETS
+
+ok = True
+
+
+def check(name, cond):
+    global ok
+    print(f"{'PASS' if cond else 'FAIL'} - {name}")
+    if not cond:
+        ok = False
+
+
+app = QApplication(sys.argv)
+
+# ---------- 1) 设置弹窗技能页 ----------
+cfg = {"api": {}, "app": {}, "editor": {}, "privacy": {"strict": True}}
+dlg = SettingsDialog(cfg)
+# 添加预设
+dlg.skill_preset_combo.setCurrentText("散文家")
+dlg._add_skill_preset()
+check("添加预设后列表有1项", dlg.skill_list.count() == 1)
+check("预设载入编辑框", "散文家" in dlg.skill_name_edit.text())
+# 修改并保存当前技能
+dlg.skill_name_edit.setText("我的散文家")
+dlg._save_current_skill()
+check("保存后列表更新", dlg.skill_list.count() == 1 and dlg._skills[0]["name"] == "我的散文家")
+# 导入技能文件
+d = tempfile.mkdtemp()
+skill_file = os.path.join(d, "s.skill")
+json.dump([
+    {"name": "悬疑风", "description": "悬疑氛围", "system_prompt": "营造悬疑氛围……", "user_prompt": "", "examples": ""},
+    {"name": "缺指令的", "description": "无效", "system_prompt": "", "user_prompt": ""},
+], open(skill_file, "w", encoding="utf-8"), ensure_ascii=False)
+old_get = __import__("PySide6.QtWidgets", fromlist=["QFileDialog"]).QFileDialog.getOpenFileName
+from PySide6.QtWidgets import QFileDialog
+QFileDialog.getOpenFileName = staticmethod(lambda *a, **k: (skill_file, "skill"))
+try:
+    dlg._import_skill()
+finally:
+    QFileDialog.getOpenFileName = old_get
+check("导入后列表+1（无效项跳过）", dlg.skill_list.count() == 2 and any(s["name"] == "悬疑风" for s in dlg._skills))
+# 删除
+dlg.skill_list.setCurrentRow(0)
+dlg._delete_skill()
+check("删除后列表-1", dlg.skill_list.count() == 1)
+# 保存设置 → config["skills"] 写入
+dlg._save()
+check("保存后 config 含技能", isinstance(cfg.get("skills"), list) and len(cfg["skills"]) == 1)
+check("config 技能名正确", cfg["skills"][0]["name"] == "悬疑风")
+
+# ---------- 2) 身份隐私确认 ----------
+cfg2 = {"api": {}, "app": {}, "editor": {}, "privacy": {"strict": True}, "identity": {}}
+dlg2 = SettingsDialog(cfg2)
+dlg2.pen_edit.setText("惊鸿")
+dlg2.pref_edit.setPlainText("擅长散文")
+# 确认保存 → 写入
+QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes)
+dlg2._save()
+check("身份确认后写入", cfg2.get("identity", {}).get("pen_name") == "惊鸿")
+# 拒绝 → 不写入
+cfg3 = {"api": {}, "app": {}, "editor": {}, "privacy": {"strict": True}, "identity": {}}
+dlg3 = SettingsDialog(cfg3)
+dlg3.pen_edit.setText("笔名X")
+QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.StandardButton.No)
+dlg3._save()
+check("身份拒绝后不写入", cfg3.get("identity", {}).get("pen_name") != "笔名X")
+# 清空身份 → 直接清空无需确认
+cfg4 = {"api": {}, "app": {}, "editor": {}, "privacy": {"strict": True},
+        "identity": {"pen_name": "旧名", "bio": "b"}}
+dlg4 = SettingsDialog(cfg4)
+dlg4.pen_edit.clear()
+dlg4.bio_edit.clear()
+QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.StandardButton.No)
+dlg4._save()
+check("清空身份直接生效", cfg4.get("identity", {}) == {})
+
+# ---------- 3) AI 面板技能 + 身份注入 ----------
+from app.ai_panel import AIPanel
+cfg5 = {
+    "api": {"system_prompt": "默认提示", "base_url": "x", "api_key": "k", "model": "m"},
+    "skills": [{"name": "散文家", "description": "", "system_prompt": "散文家指令……", "user_prompt": "", "examples": ""}],
+    "identity": {"pen_name": "惊鸿", "preferences": "擅长散文", "bio": "", "contact": "", "works": ""},
+    "privacy": {"strict": False, "ai_enabled": True},
+}
+panel = AIPanel(cfg5)
+check("技能下拉含技能名", any(panel.skill_combo.itemText(i) == "散文家" for i in range(panel.skill_combo.count())))
+check("默认无技能", panel._selected_skill() is None)
+idx = panel.skill_combo.findText("散文家")
+panel.skill_combo.setCurrentIndex(idx)
+sp = panel._build_system_prompt()
+check("选中技能注入系统提示", "散文家指令" in sp)
+check("身份注入系统提示", "作者身份" in sp and "惊鸿" in sp and "擅长散文" in sp)
+panel.skill_combo.setCurrentIndex(0)
+sp2 = panel._build_system_prompt()
+check("无技能时无技能指令", "散文家指令" not in sp2)
+check("无技能时仍有身份", "作者身份" in sp2)
+
+# ---------- 4) 帮助菜单免责声明 ----------
+win = MainWindow()
+flat = []
+for _name, menu in getattr(win, "_menus", []):
+    for a in menu.actions():
+        if not a.menu():
+            flat.append(a.text())
+check("帮助菜单含免责声明", any("免责声明" in t for t in flat))
+QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok)
+win.show_disclaimer()
+check("免责声明弹窗不报错", True)
+win.close()
+
+app.processEvents()
+
+print("\nRESULT:", "ALL PASS" if ok else "HAS FAILURES")
+sys.exit(0 if ok else 1)
