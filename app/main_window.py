@@ -425,6 +425,11 @@ class MainWindow(QMainWindow):
         self._status_timer.setSingleShot(True)
         self._status_timer.setInterval(150)
         self._status_timer.timeout.connect(self._update_status)
+        # 底部设定提示单独降频（含人名编辑距离检查，打字时高频触发会卡）
+        self._tips_timer = QTimer(self)
+        self._tips_timer.setSingleShot(True)
+        self._tips_timer.setInterval(400)
+        self._tips_timer.timeout.connect(self._update_tips)
         self._build_docks()          # 其中创建 TitleBar 并挂到顶部
         self._build_statusbar()
         self._refresh_recent_menu()
@@ -765,8 +770,11 @@ class MainWindow(QMainWindow):
         title = ""
         cid = getattr(editor, "chapter_id", None)
         if cid is not None and self.storage is not None:
-            ch = self.storage.get_chapter(cid)
-            title = ch.title if ch else ""
+            try:
+                ch = self.storage.get_chapter(cid)
+                title = ch.title if ch else ""
+            except Exception:  # noqa: BLE001   # 项目切换/关闭期间连接可能已关闭
+                title = ""
         if title:
             import html as _html
             heading = (
@@ -2638,33 +2646,74 @@ class MainWindow(QMainWindow):
         self.log(f"已新建{'章节' if self._is_serial() else '文章'}《{ch.title}》", "ok")
 
     def _refresh_chapter_dock(self):
+        """全量重建章节树（新建/删除/排序/状态/卷等低频操作）。
+        保存章节只走 _update_tree_item 局部更新，避免 1000+ 章时每次保存重建整棵树；
+        统计/大纲视图改为延迟合并刷新（_schedule_aux_refresh）。"""
         self._updating_tree = True
-        self.chapter_tree.clear()
-        if self.storage is None:
+        self.chapter_tree.setUpdatesEnabled(False)
+        try:
+            self.chapter_tree.clear()
+            if self.storage is None:
+                self._tree_item_map = {}
+                return
+            book = self.storage.get_book()
+            bookmarked = {b.chapter_id for b in self.storage.list_bookmarks()}
+            root = QTreeWidgetItem([f"📚 {book.title}"])
+            root_flags = root.flags() & ~Qt.ItemFlag.ItemIsDragEnabled
+            root.setFlags(root_flags)
+            self.chapter_tree.addTopLevelItem(root)
+            self._tree_item_map = {}
+            for ch in self.storage.list_chapters():
+                text = f"{ch.title}（{ch.word_count} 字）"
+                if ch.id in bookmarked:
+                    text = f"🔖 {text}"
+                item = QTreeWidgetItem([text])
+                item.setData(0, Qt.ItemDataRole.UserRole, ch.id)
+                item.setToolTip(0, ch.summary or "（无内容浓缩）")
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+                root.addChild(item)
+                self._tree_item_map[ch.id] = item
+            root.setExpanded(True)
+        finally:
+            self.chapter_tree.setUpdatesEnabled(True)
             self._updating_tree = False
+        self._schedule_aux_refresh()
+
+    def _update_tree_item(self, cid: int, title: str = "", word_count: int = 0):
+        """保存章节后局部更新章节树节点文本（标题+字数），不重建整棵树。
+        书签前缀在全量重建时已按当时状态写入；书签增删会走全量重建，故此处无需查书签。"""
+        item = (getattr(self, "_tree_item_map", None) or {}).get(cid)
+        if item is None:
+            self._refresh_chapter_dock()
             return
-        book = self.storage.get_book()
-        bookmarked = {b.chapter_id for b in self.storage.list_bookmarks()}
-        root = QTreeWidgetItem([f"📚 {book.title}"])
-        root_flags = root.flags() & ~Qt.ItemFlag.ItemIsDragEnabled
-        root.setFlags(root_flags)
-        self.chapter_tree.addTopLevelItem(root)
-        for ch in self.storage.list_chapters():
-            text = f"{ch.title}（{ch.word_count} 字）"
-            if ch.id in bookmarked:
-                text = f"🔖 {text}"
-            item = QTreeWidgetItem([text])
-            item.setData(0, Qt.ItemDataRole.UserRole, ch.id)
-            item.setToolTip(0, ch.summary or "（无内容浓缩）")
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
-            root.addChild(item)
-        root.setExpanded(True)
-        self._updating_tree = False
-        # 同步刷新统计视图与大纲视图
-        if hasattr(self, "stats_view"):
-            self.stats_view.refresh()
-        if hasattr(self, "outline_view"):
-            self.outline_view.reload()
+        if not title:
+            ch = self.storage.get_chapter(cid) if self.storage else None
+            if ch is None:
+                self._refresh_chapter_dock()
+                return
+            title, word_count = ch.title, ch.word_count
+        item.setText(0, f"{title}（{word_count} 字）")
+
+    def _schedule_aux_refresh(self):
+        """延迟合并刷新统计/大纲视图（保存/增删章后只刷一次，避免卡顿）。"""
+        if getattr(self, "_aux_pending", False):
+            return
+        self._aux_pending = True
+        QTimer.singleShot(0, self._do_aux_refresh)
+
+    def _do_aux_refresh(self):
+        self._aux_pending = False
+        for name in ("stats_view", "outline_view"):
+            view = getattr(self, name, None)
+            if view is None:
+                continue
+            try:
+                if name == "stats_view":
+                    view.refresh()
+                else:
+                    view.reload()
+            except Exception:  # noqa: BLE001   # 项目切换/git 回溯期间连接可能刚关闭
+                pass
 
     def _on_chapter_clicked(self, item: QTreeWidgetItem, _col: int):
         ch_id = item.data(0, Qt.ItemDataRole.UserRole)
@@ -2850,15 +2899,25 @@ class MainWindow(QMainWindow):
             return
         if self.storage is None:
             return
+        valid = []
         for cid in ids[:10]:
             try:
                 if self.storage.get_chapter(cid) is not None:
-                    self.open_chapter(cid)
+                    valid.append(cid)
             except Exception:  # noqa: BLE001
                 continue
+        # 逐个间隔打开，避免一次循环打开多个章节导致界面长时间卡顿
+        for i, cid in enumerate(valid):
+            QTimer.singleShot(i * 80, lambda c=cid: self._open_restored_chapter(c))
         self.config.setdefault("app", {}).pop("open_tabs", None)   # 恢复后清除
         save_config(self.config)
         self.log("已恢复上次打开的章节标签", "info")
+
+    def _open_restored_chapter(self, cid: int):
+        try:
+            self.open_chapter(cid)
+        except Exception:  # noqa: BLE001
+            pass
 
     def open_chapter(self, chapter_id: int):
         if self.storage is None:
@@ -2879,9 +2938,13 @@ class MainWindow(QMainWindow):
         idx = self.tabs.addTab(editor, ch.title)
         self.tabs.setTabToolTip(idx, f"{ch.subtitle}\n{ch.summary}")
         self.tabs.setCurrentIndex(idx)
+        self._record_open_tabs()
+        # 状态栏/速览延迟到事件循环后刷新：先渲染正文，打开章节不卡
+        QTimer.singleShot(0, self._after_open_editor)
+
+    def _after_open_editor(self):
         self._update_status()
         self._refresh_snap()
-        self._record_open_tabs()
 
     def _new_editor(self, chapter_id: int | None) -> EditorWidget:
         editor = EditorWidget(self.config)
@@ -2900,8 +2963,10 @@ class MainWindow(QMainWindow):
         editor.quick_texts_provider = lambda: self.config.get("app", {}).get("quick_texts", [])
         editor.names_provider = self._editor_names_provider   # 人名自动补全
         editor.cursorPositionChanged.connect(self._status_timer.start)
+        editor.cursorPositionChanged.connect(self._tips_timer.start)
         editor.textChanged.connect(self._on_editor_text_changed)
         editor.textChanged.connect(self._preview_timer.start)
+        editor.textChanged.connect(self._tips_timer.start)
         return editor
 
     def _on_editor_text_changed(self):
@@ -2989,7 +3054,8 @@ class MainWindow(QMainWindow):
         idx = self.tabs.indexOf(editor)
         if idx >= 0:
             self.tabs.setTabText(idx, ch.title)
-        self._refresh_chapter_dock()
+        self._update_tree_item(cid, ch.title, new_wc)   # 局部更新章节树，不重建整棵
+        self._schedule_aux_refresh()                    # 统计/大纲延迟合并刷新
         self.goal_view.refresh()   # 今日字数可能变化
         self._update_status()
         if hasattr(self, "word_trend_view"):
@@ -3715,9 +3781,9 @@ class MainWindow(QMainWindow):
                     title = ch.title if ch else ""
                 except Exception:  # noqa: BLE001
                     pass
-        self.snap_panel.refresh(self.storage, cid, title)
+        self.snap_panel.refresh(self.storage, cid, title, self._setting_terms())
         if hasattr(self, "snap_float") and self.snap_float.isVisible():
-            self.snap_float.refresh(self.storage, cid, title)
+            self.snap_float.refresh(self.storage, cid, title, self._setting_terms())
 
     def _editor_names_provider(self) -> list:
         if self.storage is None:
@@ -4200,14 +4266,21 @@ class MainWindow(QMainWindow):
         return "  ".join(parts)
 
     def _line_typo_hints(self, line: str) -> str:
-        """人名写错实时提示：行内疑似人名与角色库编辑距离≤1 时提示『X』疑似『Y』。"""
+        """人名写错实时提示：行内疑似人名与角色库编辑距离≤1 时提示『X』疑似『Y』。
+        按名字长度分桶缩小比较范围，最多返回 3 条。"""
         if self._planning_level() < 1:
             return ""
-        names = {w for w, (k, _d) in self._setting_terms().items() if k == "角色"}
+        names = {w for w, (k, _d) in self._setting_terms().items()
+                 if k == "角色" and 2 <= len(w) <= 4}
         if not names:
             return ""
         import re
         from .ai_check import _lev
+        by_len = {
+            2: [n for n in names if len(n) == 2],
+            3: [n for n in names if len(n) == 3],
+            4: [n for n in names if len(n) == 4],
+        }
         found: list[tuple[str, str]] = []
         for seg in re.findall(r"[\u4e00-\u9fff]+", line):
             for L in (2, 3, 4):
@@ -4215,16 +4288,36 @@ class MainWindow(QMainWindow):
                     sub = seg[i:i + L]
                     if sub in names:
                         continue
-                    for n in names:
-                        if len(n) > 4 or len(n) < 2:
-                            continue
-                        if abs(len(sub) - len(n)) <= 1 and _lev(sub, n) <= 1:
+                    cand = list(by_len.get(L, ()))
+                    if L > 2:
+                        cand += by_len.get(L - 1, ())
+                    if L < 4:
+                        cand += by_len.get(L + 1, ())
+                    for n in cand:
+                        if _lev(sub, n) <= 1:
                             if (sub, n) not in found:
                                 found.append((sub, n))
                             break
+                    if len(found) >= 3:
+                        return " · ".join(f"『{a}』疑似『{b}』" for a, b in found)
         if not found:
             return ""
         return " · ".join(f"『{a}』疑似『{b}』" for a, b in found[:3])
+
+    def _foreshadow_hint_list(self) -> list:
+        """伏笔名/埋设/回收 列表（按 storage 缓存，避免每次提示查库）。"""
+        if self.storage is None:
+            return []
+        sid = id(self.storage)
+        if getattr(self, "_foreshadow_cache_id", None) != sid:
+            try:
+                self._foreshadow_cache = [
+                    ((f.name or "").strip(), f.plant_chapter or "", f.harvest_chapter or "")
+                    for f in self.storage.list_foreshadows()]
+            except Exception:  # noqa: BLE001
+                self._foreshadow_cache = []
+            self._foreshadow_cache_id = sid
+        return self._foreshadow_cache
 
     def _line_foreshadow_hints(self, line: str) -> str:
         """伏笔回收提醒（长篇）：当前行命中伏笔名时提示埋设/回收章节。"""
@@ -4232,15 +4325,20 @@ class MainWindow(QMainWindow):
             return ""
         out: list[str] = []
         try:
-            for f in self.storage.list_foreshadows():
-                name = (f.name or "").strip()
+            for name, plant, harvest in self._foreshadow_hint_list():
                 if name and name in line:
-                    loc = (f"埋:{f.plant_chapter}" if f.plant_chapter else "")
-                    loc += (f"收:{f.harvest_chapter}" if f.harvest_chapter else "")
+                    loc = (f"埋:{plant}" if plant else "")
+                    loc += (f"收:{harvest}" if harvest else "")
                     out.append(f"伏笔『{name}』（{loc}）" if loc else f"伏笔『{name}』")
         except Exception:  # noqa: BLE001
             pass
         return " · ".join(out[:3])
+
+    def _update_tips(self):
+        """底部设定提示（400ms 降频）：命中设定/人名疑似/伏笔回收。"""
+        editor = self.current_editor()
+        if editor is not None and hasattr(self, "editor_tips_label"):
+            self.editor_tips_label.setText(self._line_setting_hits(editor))
 
     def _update_status(self):
         if self.storage is not None:
@@ -4296,7 +4394,7 @@ class MainWindow(QMainWindow):
             self.editor_today_label.setText(f"✍️ 今日 {today_words}/{goal} 字")
             self.editor_pos_label.setText(editor.current_position_text())
             self.editor_mod_label.setText("● 未保存" if editor.document().isModified() else "✓ 已保存")
-            self.editor_tips_label.setText(self._line_setting_hits(editor))
+            # 底部设定提示改由 _tips_timer（400ms 降频）更新，避免打字时高频重计算
         else:
             self.pos_label.setText("行 1, 列 1")
             self.words_label.setText(f"本{unit} 0 字")

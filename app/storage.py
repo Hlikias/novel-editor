@@ -457,6 +457,14 @@ class Storage:
             ).fetchone()
         return int(row["t"])
 
+    def today_updated_words(self, today: str) -> int:
+        """指定日期（YYYY-MM-DD）当天更新过的章节字数合计（写作目标进度用，SQL 聚合）。"""
+        row = self.conn.execute(
+            "SELECT COALESCE(SUM(word_count), 0) AS t FROM chapters WHERE updated_at LIKE ?",
+            (today + "%",),
+        ).fetchone()
+        return int(row["t"])
+
     def get_chapter(self, chapter_id: int) -> Optional[Chapter]:
         row = self.conn.execute(
             "SELECT * FROM chapters WHERE id=?", (chapter_id,)

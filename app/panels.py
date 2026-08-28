@@ -103,11 +103,15 @@ class StatsView(QWidget):
         unit_zh = "章节" if serial else "文章"
         self.summary.setText(f"📚 {book.title}\n{unit_zh} {len(chapters)} ｜ 总字数 {total}")
         self.tree.setHeaderLabels([unit_zh, "字数", "状态"])
-        self.tree.clear()
-        for ch in chapters:
-            self.tree.addTopLevelItem(
-                QTreeWidgetItem([ch.title, str(ch.word_count), ch.status])
-            )
+        self.tree.setUpdatesEnabled(False)
+        try:
+            self.tree.clear()
+            for ch in chapters:
+                self.tree.addTopLevelItem(
+                    QTreeWidgetItem([ch.title, str(ch.word_count), ch.status])
+                )
+        finally:
+            self.tree.setUpdatesEnabled(True)
         if chapters:
             self.tree.show()
             self.empty_hint.hide()
@@ -524,10 +528,10 @@ class WritingGoalView(QWidget):
             self.info.setText("未打开项目")
             return
         today = date.today().strftime("%Y-%m-%d")
-        words = sum(
-            c.word_count for c in self.storage.list_chapters()
-            if c.updated_at.startswith(today)
-        )
+        try:
+            words = self.storage.today_updated_words(today)   # SQL 聚合，避免全表拉取
+        except Exception:  # noqa: BLE001
+            words = 0
         self.progress.setRange(0, max(1, self.goal))
         self.progress.setValue(min(words, self.goal))
         pct = min(100, round(words / self.goal * 100)) if self.goal else 0

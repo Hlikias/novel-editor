@@ -3,6 +3,7 @@
 import os
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -123,7 +124,10 @@ win2 = MainWindow()
 win2.config = {"app": {"open_tabs": {"path": st.db_path, "ids": [ch1.id, ch2.id]}}}
 win2.storage = None   # 启动态：未打开项目
 win2._restore_open_tabs()
-app.processEvents()
+# 恢复改为逐个间隔打开（避免一次循环卡顿），需等待定时器完成
+for _ in range(15):
+    app.processEvents()
+    time.sleep(0.06)
 assert ch1.id in win2._tab_chapters and ch2.id in win2._tab_chapters
 print("9) H 重启恢复标签 OK")
 win2.close()

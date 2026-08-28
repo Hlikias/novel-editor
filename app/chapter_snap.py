@@ -53,8 +53,10 @@ def chapter_matches(plan_text: str, chapter_title: str) -> bool:
     return bool(a is not None and b is not None and a == b)
 
 
-def chapter_snap_data(storage, chapter_id: int, chapter_title: str) -> dict:
-    """汇总当前章节的规划信息。storage 为空或章节未保存时返回空结构。"""
+def chapter_snap_data(storage, chapter_id: int, chapter_title: str,
+                      terms: dict | None = None) -> dict:
+    """汇总当前章节的规划信息。storage 为空或章节未保存时返回空结构。
+    terms 可传入已缓存的设定词表（None 时自行查询，供高频调用复用缓存）。"""
     out = {"card": None, "foreshadows": [], "nodes": [], "characters": [],
            "setting_hits": []}
     if storage is None or chapter_id <= 0:
@@ -77,7 +79,8 @@ def chapter_snap_data(storage, chapter_id: int, chapter_title: str) -> dict:
             ch = storage.get_chapter(chapter_id)
             body = (ch.content or "") if ch else ""
             plain = _strip_html(body)[:2000]
-            terms = storage.setting_terms()
+            if terms is None:
+                terms = storage.setting_terms()
             seen: set[str] = set()
             for word, (kind, desc) in terms.items():
                 if word and word in plain and word not in seen:
@@ -175,8 +178,9 @@ class ChapterSnapPanel(QWidget):
         self.view.setPlaceholderText("打开一个章节后，这里显示它的章节卡片 / 伏笔 / 剧情线 / 人物。")
         lay.addWidget(self.view, 1)
 
-    def refresh(self, storage, chapter_id: int, chapter_title: str):
-        data = chapter_snap_data(storage, chapter_id, chapter_title)
+    def refresh(self, storage, chapter_id: int, chapter_title: str,
+                terms: dict | None = None):
+        data = chapter_snap_data(storage, chapter_id, chapter_title, terms)
         self.view.setPlainText(format_snap(data, chapter_title))
         self.title_label.setText(f"📋 本章速览 · {chapter_title or '未打开章节'}")
 
@@ -208,8 +212,9 @@ class ChapterSnapFloat(QWidget):
         self.view.setReadOnly(True)
         lay.addWidget(self.view, 1)
 
-    def refresh(self, storage, chapter_id: int, chapter_title: str):
-        data = chapter_snap_data(storage, chapter_id, chapter_title)
+    def refresh(self, storage, chapter_id: int, chapter_title: str,
+                terms: dict | None = None):
+        data = chapter_snap_data(storage, chapter_id, chapter_title, terms)
         self.view.setPlainText(format_snap(data, chapter_title))
         self.title_label.setText(f"🪟 {chapter_title or '未打开章节'}")
 

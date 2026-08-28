@@ -51,21 +51,25 @@ class OutlineView(QWidget):
 
     def reload(self):
         self.tree.blockSignals(True)
-        self.tree.clear()
-        if self.storage:
-            groups: dict[str, list] = {}
-            for ch in self.storage.list_chapters():
-                groups.setdefault(ch.volume or VOLUME_NONE, []).append(ch)
-            for vol, chapters in groups.items():
-                vol_item = QTreeWidgetItem([f"📚 {vol}（{len(chapters)}）"])
-                vol_item.setData(0, Qt.ItemDataRole.UserRole, "__VOL__")
-                self.tree.addTopLevelItem(vol_item)
-                for ch in chapters:
-                    child = QTreeWidgetItem([f"{ch.title}（{ch.word_count} 字）"])
-                    child.setData(0, Qt.ItemDataRole.UserRole, ch.id)
-                    vol_item.addChild(child)
-                vol_item.setExpanded(True)
-        self.tree.blockSignals(False)
+        self.tree.setUpdatesEnabled(False)
+        try:
+            self.tree.clear()
+            if self.storage:
+                groups: dict[str, list] = {}
+                for ch in self.storage.list_chapters():
+                    groups.setdefault(ch.volume or VOLUME_NONE, []).append(ch)
+                for vol, chapters in groups.items():
+                    vol_item = QTreeWidgetItem([f"📚 {vol}（{len(chapters)}）"])
+                    vol_item.setData(0, Qt.ItemDataRole.UserRole, "__VOL__")
+                    self.tree.addTopLevelItem(vol_item)
+                    for ch in chapters:
+                        child = QTreeWidgetItem([f"{ch.title}（{ch.word_count} 字）"])
+                        child.setData(0, Qt.ItemDataRole.UserRole, ch.id)
+                        vol_item.addChild(child)
+                    vol_item.setExpanded(True)
+        finally:
+            self.tree.setUpdatesEnabled(True)
+            self.tree.blockSignals(False)
 
     # ---------- 交互 ----------
     def _on_double(self, item: QTreeWidgetItem, _col: int):
