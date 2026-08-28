@@ -34,7 +34,7 @@ class WelcomePage(QWidget):
         center.setAlignment(Qt.AlignmentFlag.AlignCenter)
         center.setSpacing(16)
 
-        title = QLabel("小说编辑器")
+        title = QLabel("AI码小说")
         title.setObjectName("welcomeTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         center.addWidget(title)

@@ -50,7 +50,7 @@ class GitManager:
         for key in ("user.name", "user.email"):
             if self._run("config", key, check=False).stdout.strip() == "":
                 if key == "user.name":
-                    self._run("config", "user.name", "小说编辑器")
+                    self._run("config", "user.name", "AI码小说")
                 else:
                     self._run("config", "user.email", "novel-editor@local")
         return "仓库已初始化"

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""小说编辑器 —— 程序入口。
+"""AI码小说 —— 程序入口。
 
 运行:  python main.py
 """
@@ -90,7 +90,7 @@ def _make_frameless_input(mode: str):
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("小说编辑器")
+    app.setApplicationName("AI码小说")
     app.setOrganizationName("NovelEditor")
     if os.path.exists(APP_ICON):
         app.setWindowIcon(QIcon(APP_ICON))   # 窗口/任务栏图标（书+笔）

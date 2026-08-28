@@ -78,7 +78,7 @@ class ConsoleWidget(QPlainTextEdit):
 
     def _print_banner(self):
         self.setPlainText(
-            "小说编辑器控制台\n"
+            "AI码小说控制台\n"
             "常用命令：ls / open <编号> / new <标题> / save / stats / goto <行> /\n"
             "         theme <light|dark|pink> / words / find <关键词>\n"
             "可用对象：storage(当前项目), book(当前书籍), count_words(文本)\n"
@@ -385,7 +385,7 @@ class MainWindow(QMainWindow):
         self._recent_menu: QMenu | None = None
         self._shortcut_actions: dict[str, list[QAction]] = {}  # 可自定义快捷键注册表
 
-        self.setWindowTitle("小说编辑器")
+        self.setWindowTitle("AI码小说")
         # 无边框窗口：自定义顶栏承载菜单与窗口控制按钮
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setMinimumSize(900, 600)
@@ -441,7 +441,7 @@ class MainWindow(QMainWindow):
         # 崩溃/异常退出后恢复上次打开的章节标签
         QTimer.singleShot(800, self._restore_open_tabs)
 
-        self.log("欢迎使用小说编辑器！通过「文件 → 新建项目」开始创作。")
+        self.log("欢迎使用AI码小说！通过「文件 → 新建项目」开始创作。")
 
     def _on_second(self):
         if self.storage is not None and self.isActiveWindow():
@@ -2466,7 +2466,7 @@ class MainWindow(QMainWindow):
                 pass
         self.storage = storage
         book = storage.ensure_book()
-        self.setWindowTitle(f"小说编辑器 - {book.title}")
+        self.setWindowTitle(f"AI码小说 - {book.title}")
         self.book_label.setText(f"📚 {book.title}")
         self.console.namespace["storage"] = storage
         self.console.namespace["book"] = book
@@ -2497,7 +2497,7 @@ class MainWindow(QMainWindow):
         self.storage = None
         self.chapter_tree.clear()
         self._sync_unit_terms()
-        self.setWindowTitle("小说编辑器")
+        self.setWindowTitle("AI码小说")
         self.book_label.setText("未打开项目")
         self.console.namespace["storage"] = None
         self.console.namespace["book"] = None
@@ -3631,7 +3631,7 @@ class MainWindow(QMainWindow):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             book = dlg.book()
             self.storage.save_book(book)
-            self.setWindowTitle(f"小说编辑器 - {book.title}")
+            self.setWindowTitle(f"AI码小说 - {book.title}")
             self.book_label.setText(f"📚 {book.title}")
             self.console.namespace["book"] = book
             self._refresh_chapter_dock()
@@ -3894,7 +3894,7 @@ class MainWindow(QMainWindow):
     def show_about(self):
         QMessageBox.about(
             self, "关于",
-            "<h3>小说编辑器 v1.0</h3>"
+            "<h3>AI码小说 v1.0</h3>"
             "<p>面向中文写作者的桌面写作工具，基于 Python + PySide6。</p>"
             "<p>功能：VSCode 式编辑器（首行缩进 / 自动换行 / GBK）、"
             "章节管理、角色/武器/属性设定、AI 辅助写作。</p>"

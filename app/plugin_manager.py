@@ -18,7 +18,7 @@ import sys
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".novel_editor")
 PLUGIN_DIR = os.path.join(CONFIG_DIR, "plugins")
 
-README = """这里是「小说编辑器」的插件目录。
+README = """这里是「AI码小说」的插件目录。
 
 每个插件是一个 .py 文件（文件名不要以 _ 开头），定义一个 Plugin 类：
 

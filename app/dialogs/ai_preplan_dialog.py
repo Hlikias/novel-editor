@@ -86,6 +86,9 @@ class AIPreplanDialog(GradientDialog):
         self.on_write = on_write
         self._data: dict | None = None
         self.setMinimumSize(1000, 620)
+        # 初始默认长宽（按用户设定，无记忆几何时也使用）
+        self._default_size_set = True
+        self.resize(1230, 954)
 
         body = self.body
         # 横向布局：左=参数区，右=生成结果

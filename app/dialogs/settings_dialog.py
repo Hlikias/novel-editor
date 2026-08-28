@@ -553,7 +553,7 @@ class SettingsDialog(GradientDialog):
         about_tab = QWidget()
         about_layout = QVBoxLayout(about_tab)
         about_label = QLabel(
-            "小说编辑器 v1.0\n\n"
+            "AI码小说 v1.0\n\n"
             "一个面向中文写作者的桌面写作工具：\n"
             "· VSCode 式多标签编辑器，支持首行缩进 / 自动换行 / GBK\n"
             "· 章节管理、角色 / 武器 / 属性设定管理\n"
