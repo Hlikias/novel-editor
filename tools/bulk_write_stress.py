@@ -2,8 +2,11 @@
 """长篇小说海量写入压力测试：1000 章 × 3000~4000 字随机正文，批量落库保存，
 验证写入性能、数据库大小、重开一致性，以及主窗口打开该项目的表现。
 
-用法：python tools/bulk_write_stress.py
-数据写入临时目录，不触碰 ~/.novel_editor 与真实项目。"""
+用法：
+  python tools/bulk_write_stress.py                # 写入临时目录，结束自动删除
+  python tools/bulk_write_stress.py --keep <目录>   # 生成后把 .db 保留到指定目录
+数据默认写入临时目录，不触碰 ~/.novel_editor 与真实项目。"""
+import argparse
 import os
 import random
 import shutil
@@ -67,7 +70,15 @@ def gen_chapter_text(target_words: int, rng: random.Random) -> str:
 
 
 def main():
+    ap = argparse.ArgumentParser(description="长篇海量写入压力测试")
+    ap.add_argument("--keep", metavar="DIR", default="",
+                    help="生成后把 .db 保留到指定目录（默认临时目录，结束自动删除）")
+    args = ap.parse_args()
+
     rng = random.Random(42)
+    keep_dir = os.path.abspath(args.keep) if args.keep else ""
+    if keep_dir and not os.path.isdir(keep_dir):
+        os.makedirs(keep_dir, exist_ok=True)
     d = tempfile.mkdtemp(prefix="bulk_1000_")
     print("=== 长篇海量写入压力测试 ===")
     print(f"目标：1000 章 × 每章 3000~4000 字 | 临时目录：{d}\n")
@@ -168,7 +179,13 @@ def main():
 
     st.close()
     st2.close()
-    shutil.rmtree(d, ignore_errors=True)
+    if keep_dir:
+        final_path = os.path.join(keep_dir, "海量测试-1000章.db")
+        shutil.move(db_path, final_path)
+        print(f"\n[保留] 数据库已保留到：{final_path}（{os.path.getsize(final_path)/1024/1024:.1f} MB）")
+        print("       可用「AI码小说 → 文件 → 打开项目…」选择该 .db 直接浏览读取。")
+    else:
+        shutil.rmtree(d, ignore_errors=True)
     print("\n" + ("== 压力测试全部通过 ==" if ok else "== 存在失败项 =="))
     return 0 if ok else 1
 
