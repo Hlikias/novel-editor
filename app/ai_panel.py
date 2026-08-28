@@ -273,8 +273,8 @@ class AIPanel(QWidget):
     def _build_system_prompt(self) -> str:
         """组合系统提示：默认 system_prompt + 勾选的全局 AI 参数。
 
-        全局参数在「设置 → API」配置：技能指令 / 身份 / 以往作品 / 写作风格，
-        各自 checkbox + lineedit，勾选且填了内容才注入（作用于所有 AI 请求）。
+        技能指令在「设置 → API」编辑/导入；身份 / 以往作品 / 写作风格
+        的内容来自「作者身份」页（config["identity"]），这里只按勾选决定是否注入。
         若未勾选"技能指令"但 AI 面板选中了技能，则注入该技能的指令（局部生效）。"""
         parts = [self.config.get("api", {}).get("system_prompt", "") or ""]
         ai_cfg = self.config.get("ai", {})
@@ -288,18 +288,22 @@ class AIPanel(QWidget):
             skill = self._selected_skill()
             if skill and (skill.get("system_prompt") or "").strip():
                 parts.append(skill["system_prompt"].strip())
+        ident = self.config.get("identity") or {}
         if ai_cfg.get("global_identity", old_ctx):
-            text = (ai_cfg.get("identity_text") or "").strip()
-            if text:
-                parts.append("【作者身份（写作时参考）】" + text)
+            labels = {"pen_name": "笔名", "bio": "简介", "preferences": "写作偏好",
+                      "contact": "联系方式", "works": "作品"}
+            bits = [f"{labels.get(k, k)}：{str(v).strip()}"
+                    for k, v in ident.items() if str(v).strip()]
+            if bits:
+                parts.append("【作者身份（写作时参考）】" + "；".join(bits))
         if ai_cfg.get("global_works", False):
-            text = (ai_cfg.get("works_text") or "").strip()
-            if text:
-                parts.append("【作者以往作品】" + text)
+            works = str(ident.get("works") or "").strip()
+            if works:
+                parts.append("【作者以往作品】" + works)
         if ai_cfg.get("global_style", False):
-            text = (ai_cfg.get("style_text") or "").strip()
-            if text:
-                parts.append("【写作风格（写作时遵循）】" + text)
+            style = str(ident.get("preferences") or "").strip()
+            if style:
+                parts.append("【写作风格（写作时遵循）】" + style)
         return "\n".join(p for p in parts if p.strip())
 
     # ---------- 行为 ----------

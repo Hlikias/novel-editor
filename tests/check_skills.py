@@ -113,29 +113,27 @@ QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.StandardButton.N
 dlg4._save()
 check("清空身份直接生效", cfg4.get("identity", {}) == {})
 
-# ---------- 3) AI 面板技能 + 全局参数注入（checkbox+lineedit） ----------
+# ---------- 3) AI 面板技能 + 全局参数注入（引用技能/作者身份页内容） ----------
 from app.ai_panel import AIPanel
 cfg5 = {
     "api": {"system_prompt": "默认提示", "base_url": "x", "api_key": "k", "model": "m"},
     "skills": [{"name": "散文家", "description": "", "system_prompt": "散文家指令……", "user_prompt": "", "examples": ""}],
     "ai": {
         "global_skill": True, "skill_text": "全局技能指令：你是散文家……",
-        "global_identity": True, "identity_text": "作者笔名 惊鸿，擅长散文",
-        "global_works": True, "works_text": "《山居笔记》",
-        "global_style": True, "style_text": "语言细腻、多用短句",
+        "global_identity": True, "global_works": True, "global_style": True,
         "memory_enabled": True,
     },
+    "identity": {"pen_name": "惊鸿", "preferences": "擅长散文、语言细腻",
+                 "works": "《山居笔记》《夜雨录》", "bio": "", "contact": ""},
     "privacy": {"strict": False, "ai_enabled": True},
 }
 panel = AIPanel(cfg5)
 check("技能下拉含技能名", any(panel.skill_combo.itemText(i) == "散文家" for i in range(panel.skill_combo.count())))
-idx = panel.skill_combo.findText("散文家")
-panel.skill_combo.setCurrentIndex(idx)
 sp = panel._build_system_prompt()
 check("勾选技能指令→注入全局技能文本", "全局技能指令" in sp)
-check("勾选身份→注入身份", "作者身份" in sp and "惊鸿" in sp)
-check("勾选以往作品→注入", "作者以往作品" in sp and "山居笔记" in sp)
-check("勾选写作风格→注入", "写作风格" in sp and "细腻" in sp)
+check("勾选身份→注入身份页数据", "作者身份" in sp and "惊鸿" in sp)
+check("勾选以往作品→注入身份页作品", "作者以往作品" in sp and "山居笔记" in sp)
+check("勾选写作风格→注入身份页偏好", "写作风格" in sp and "细腻" in sp)
 
 # 取消勾选各参数 → 对应内容不再注入
 panel.config["ai"]["global_skill"] = False
@@ -154,6 +152,7 @@ sp6 = panel._build_system_prompt()
 check("取消风格→无风格", "写作风格" not in sp6)
 # 未勾选全局技能但选中局部技能 → 局部技能生效
 panel.config["ai"]["global_skill"] = False
+idx = panel.skill_combo.findText("散文家")
 panel.skill_combo.setCurrentIndex(idx)
 sp7 = panel._build_system_prompt()
 check("未勾全局技能时局部技能生效", "散文家指令" in sp7)
@@ -230,11 +229,13 @@ check("帮助菜单含免责声明", any("免责声明" in t for t in flat))
 QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok)
 win.show_disclaimer()
 check("免责声明弹窗不报错", True)
-# 关于对话框也含免责声明
+# 关于对话框也含免责声明与作者信息
 captured = {}
 QMessageBox.about = staticmethod(lambda parent, title, text: captured.update(t=text))
 win.show_about()
 check("关于对话框含免责声明", "免责声明" in captured.get("t", ""))
+check("关于对话框含作者云涌风", "云涌风" in captured.get("t", ""))
+check("关于对话框含B站", "B站" in captured.get("t", ""))
 win.close()
 
 app.processEvents()
