@@ -450,6 +450,8 @@ class MainWindow(QMainWindow):
         self._add_action(file_menu, "导出当前章节为文本…", self.export_current_chapter, None, "SP_DialogSaveButton")
         self._add_action(file_menu, "导出全部章节…", self.export_all_chapters, None, None)
         self._add_action(file_menu, "📄 导出为 Word（格式设置）…", self.export_current_docx, None, None)
+        self._add_action(file_menu, "📄 导出为 PDF…", self.export_current_pdf, None, None)
+        self._add_action(file_menu, "🖨 打印当前文章…", self.print_current_chapter, "Ctrl+P", None)
         self._add_action(file_menu, "📋 按范本导出（AI）…", self._show_template_export_dialog, None, None)
         self._add_action(file_menu, "导出全书合订本…", self.export_combined, None, None)
         self._add_action(file_menu, "📤 导出网文格式…", self.export_webnovel, None, None)
@@ -2574,6 +2576,48 @@ class MainWindow(QMainWindow):
         self.log(f"已导出 Word（{fmt.describe()}）: {path}", "ok")
         return True
 
+    # ---------- PDF 导出 / 打印 ----------
+    def export_current_pdf(self):
+        """导出当前文章为 PDF（按当前记忆/默认格式渲染：标题居中、正文缩进与行距）。"""
+        editor = self.current_editor()
+        if editor is None:
+            QMessageBox.information(self, "提示", "没有打开的文章。")
+            return
+        ch_title = self._current_ch_title()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出为 PDF", os.path.join(os.path.expanduser("~"), f"{ch_title or '文章'}.pdf"),
+            "PDF 文件 (*.pdf)",
+        )
+        if not path:
+            return
+        try:
+            from .docx_export import DocFormat
+            from .exporter import export_pdf_formatted
+            fmt = DocFormat.from_config(self.config.setdefault("export", {}).get("docx_format"))
+            export_pdf_formatted(path, editor.content(), ch_title, fmt)
+            self.log(f"已导出 PDF: {path}", "ok")
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "导出失败", f"{e}")
+            self.log(f"导出失败: {e}", "error")
+
+    def print_current_chapter(self):
+        """打印当前文章：QPrintDialog 选择打印机，按编辑器富文本原样打印。"""
+        editor = self.current_editor()
+        if editor is None:
+            QMessageBox.information(self, "提示", "没有打开的文章。")
+            return
+        from PySide6.QtPrintSupport import QPrintDialog, QPrinter
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        dlg = QPrintDialog(printer, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            editor.document().print_(printer)
+            self.log("已发送到打印机", "ok")
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "打印失败", f"{e}")
+            self.log(f"打印失败: {e}", "error")
+
     # ---------- 按范本导出（AI） ----------
     def _show_template_export_dialog(self):
         if not hasattr(self, "_tpl_export_dialog") or self._tpl_export_dialog is None:
@@ -2584,16 +2628,18 @@ class MainWindow(QMainWindow):
         self._tpl_export_dialog.activateWindow()
 
     def _tpl_export(self, mode: str, text: str, fmt, words: int,
-                    extra: str, done_cb):
-        """按范本导出：plain=直接排版；ai_gen/ai_polish=AI 处理后按范本格式导出。"""
+                    extra: str, kind: str, done_cb):
+        """按范本/手动格式导出：plain=直接排版；ai_gen/ai_polish=AI 处理后按格式导出。
+
+        kind: docx / pdf。"""
         if mode == "plain":
             title = self._current_ch_title()
-            self._tpl_save_docx(text, fmt, done_cb, title=title)
+            self._tpl_save(text, fmt, done_cb, title=title, kind=kind)
             return
         if mode == "ai_gen":
             prompt = (
                 "你是一位资深中文写作者。请按用户要求写一篇文章。\n"
-                f"【排版规范（程序将按范本套用，你只需输出标题与正文）】\n{fmt.describe()}\n"
+                f"【排版规范（程序将按所选格式套用，你只需输出标题与正文）】\n{fmt.describe()}\n"
                 f"【写作要求】\n{text}\n"
                 f"【目标字数】约 {int(words)} 字\n"
                 f"【附加要求】{extra if extra else '无'}\n"
@@ -2606,20 +2652,20 @@ class MainWindow(QMainWindow):
             prompt = (
                 "你是资深中文编辑。请润色以下文章：保持原意与整体结构，改进语言表达、"
                 "修正语病与用词，使其更流畅优美。\n"
-                f"【排版规范（程序将按范本套用，你只需输出标题与正文）】\n{fmt.describe()}\n"
+                f"【排版规范（程序将按所选格式套用，你只需输出标题与正文）】\n{fmt.describe()}\n"
                 f"【附加要求】{extra if extra else '无'}\n"
                 "【原文】\n" + text + "\n"
                 "【输出要求】第一行输出标题，第二行起为正文，自然分段（空行分段），"
                 "不要解释性文字、不要用 Markdown 符号。"
             )
-        self.log("AI 按范本处理中…", "info")
+        self.log("AI 按格式处理中…", "info")
 
         def _ai_done(out, err):
             if err:
                 done_cb(str(err))
                 return
             if out and str(out).strip():
-                self._tpl_save_docx(str(out), fmt, done_cb, title=None)
+                self._tpl_save(str(out), fmt, done_cb, title=None, kind=kind)
             else:
                 done_cb("AI 未返回内容")
 
@@ -2633,13 +2679,14 @@ class MainWindow(QMainWindow):
             return ch.title if ch else ""
         return ""
 
-    def _tpl_save_docx(self, text: str, fmt, done_cb, title: str | None = None):
-        """按范本格式导出 docx：title 为空时取文本首行作为标题。"""
-        from .docx_export import export_docx_formatted
+    def _tpl_save(self, text: str, fmt, done_cb, title: str | None = None,
+                  kind: str = "docx"):
+        """按所选格式导出 docx/pdf：title 为空时取文本首行作为标题。"""
+        ext = ".pdf" if kind == "pdf" else ".docx"
         path, _ = QFileDialog.getSaveFileName(
-            self, "导出为 Word（按范本格式）",
-            os.path.join(os.path.expanduser("~"), "按范本导出.docx"),
-            "Word 文档 (*.docx)",
+            self, "导出为 Word（按格式）" if kind == "docx" else "导出为 PDF（按格式）",
+            os.path.join(os.path.expanduser("~"), f"按格式导出{ext}"),
+            "PDF 文件 (*.pdf)" if kind == "pdf" else "Word 文档 (*.docx)",
         )
         if not path:
             done_cb("已取消")
@@ -2655,11 +2702,16 @@ class MainWindow(QMainWindow):
         else:
             body = text
         try:
-            export_docx_formatted(path, body, title=title, fmt=fmt)
-            self.log(f"已按范本导出 Word: {path}", "ok")
+            if kind == "pdf":
+                from .exporter import export_pdf_formatted
+                export_pdf_formatted(path, body, title=title, fmt=fmt)
+            else:
+                from .docx_export import export_docx_formatted
+                export_docx_formatted(path, body, title=title, fmt=fmt)
+            self.log(f"已按格式导出: {path}", "ok")
             done_cb(None)
         except Exception as e:  # noqa: BLE001
-            self.log(f"按范本导出失败: {e}", "error")
+            self.log(f"按格式导出失败: {e}", "error")
             done_cb(str(e))
 
     def _edit_op(self, op: str):

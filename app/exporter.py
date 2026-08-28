@@ -94,6 +94,53 @@ def export_pdf(path: str, text: str, title: str = "") -> None:
     doc.print_(printer)
 
 
+def export_pdf_formatted(path: str, text: str, title: str = "",
+                         fmt: "DocFormat | None" = None) -> None:
+    """按格式设置生成 PDF：标题（字体/字号/加粗/对齐）+ 正文（字号/字体/行距）。
+
+    首行缩进：正文保留原文全角空格（编辑器正文天然带全角缩进），
+    行距通过 QTextBlockFormat 逐块设置（比例行距）。"""
+    from PySide6.QtGui import QPageSize, QTextCursor, QTextDocument
+    from PySide6.QtPrintSupport import QPrinter
+    from .docx_export import DocFormat
+
+    fmt = fmt or DocFormat()
+    body_lines = [ln for ln in text.replace("\r\n", "\n").split("\n")]
+    parts = []
+    if title:
+        ta = {"center": "center", "left": "left", "right": "right"}.get(
+            fmt.title_align, "justify")
+        parts.append(
+            f'<p style="text-align:{ta};font-size:{fmt.title_size}pt;'
+            f'font-family:\'{fmt.title_font}\';font-weight:bold;margin-bottom:12px;">'
+            f"{escape(title)}</p>"
+        )
+    for ln in body_lines:
+        if not ln.strip():
+            parts.append("<p>&nbsp;</p>")
+        else:
+            parts.append(
+                f'<p style="font-size:{fmt.body_size}pt;font-family:\'{fmt.body_font}\';">'
+                f"{escape(ln)}</p>"
+            )
+    doc = QTextDocument()
+    doc.setHtml("".join(parts))
+    # 行距：Qt HTML 的 line-height 支持有限，用块格式兜底设置比例行距
+    block = doc.begin()
+    while block.isValid():
+        if block.text().strip():
+            bf = block.blockFormat()
+            bf.setLineHeight(int(fmt.line_spacing * 100), 1)   # 1 = ProportionalHeight
+            QTextCursor(block).setBlockFormat(bf)
+        block = block.next()
+
+    printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+    printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+    printer.setOutputFileName(path)
+    printer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+    doc.print_(printer)
+
+
 def export(path: str, text: str, fmt: str, title: str = "", encoding: str = "UTF-8") -> None:
     """按格式分发导出。"""
     if fmt == "txt":

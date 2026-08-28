@@ -18,7 +18,7 @@ import app.main_window as _mw
 _mw.save_config = lambda cfg: None
 from app.main_window import MainWindow
 from app.docx_export import (
-    DocFormat, PRESETS, export_docx_formatted, parse_template,
+    FONTS, DocFormat, PRESETS, export_docx_formatted, parse_template,
 )
 from app.dialogs.export_format_dialog import ExportFormatDialog
 from docx import Document
@@ -151,13 +151,41 @@ out3 = os.path.join(dd, "tpl_out.docx")
 QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (out3, "docx"))
 fired = []
 try:
-    win._tpl_save_docx("标题行\n正文第一段。\n\n正文第二段。", PRESETS["默认"], fired.append, title=None)
+    win._tpl_save("标题行\n正文第一段。\n\n正文第二段。", PRESETS["默认"], fired.append, title=None, kind="docx")
 finally:
     QFileDialog.getSaveFileName = old_save
 check("plain 按范本导出完成", fired == [None] and os.path.exists(out3))
 doc3 = Document(out3)
 t3 = [p.text for p in doc3.paragraphs if p.text.strip()]
 check("plain 导出标题取首行", t3 and t3[0] == "标题行")
+
+# PDF 导出（格式化）：生成文件存在
+out4 = os.path.join(dd, "out.pdf")
+from app.exporter import export_pdf_formatted
+export_pdf_formatted(out4, "　　第一段。\n　　第二段。", title="PDF标题", fmt=PRESETS["默认"])
+check("PDF 导出生成文件", os.path.exists(out4) and os.path.getsize(out4) > 1000)
+
+# 手动格式弹窗：current_fmt 构建正确
+from app.dialogs.template_export_dialog import TemplateExportDialog
+td = TemplateExportDialog()
+td.manual_radio.setChecked(True)
+mf = td.current_fmt()
+check("手动格式行距可设", mf is not None and mf.line_spacing in (1.0, 1.15, 1.5, 2.0, 2.5, 3.0))
+check("手动格式正文字体", mf.body_font in FONTS)
+check("手动格式缩进 2 字符", mf.first_indent_chars == 2.0)
+td.tpl_radio.setChecked(True)
+check("范本模式未选范本 fmt=None", td.current_fmt() is None)
+td.deleteLater()
+
+# 打印：patch QPrintDialog.exec → 取消，流程不崩
+from PySide6.QtPrintSupport import QPrintDialog
+old_exec = QPrintDialog.exec
+QPrintDialog.exec = lambda self: QPrintDialog.DialogCode.Rejected
+try:
+    win.print_current_chapter()
+    check("打印取消不报错", True)
+finally:
+    QPrintDialog.exec = old_exec
 
 # 菜单入口存在（主窗口菜单存于 self._menus：[(name, QMenu), ...]）
 flat = []
@@ -167,6 +195,8 @@ for _name, menu in getattr(win, "_menus", []):
             flat.append(a.text())
 check("菜单含按范本导出", any("按范本导出" in t for t in flat))
 check("菜单含导出为Word", any("导出为 Word" in t for t in flat))
+check("菜单含导出为PDF", any("导出为 PDF" in t for t in flat))
+check("菜单含打印", any("打印" in t for t in flat))
 
 win.close()
 app.processEvents()
