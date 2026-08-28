@@ -52,5 +52,16 @@ assert area_log == Qt.DockWidgetArea.BottomDockWidgetArea, area_log
 assert win.ai_dock.isVisible() and win.log_dock.isVisible()
 print("3) AI 面板与日志同在底部 OK（左右分布由 splitDockWidget 建立）")
 
+# 4) AI 面板 提问/回答 框布局随 dock 位置自适应：底部=左右，两侧=上下
+panel = win.ai_panel
+assert panel._io_splitter.orientation() == Qt.Orientation.Horizontal, "底部应左右分布"
+panel.set_layout_for_dock(Qt.DockWidgetArea.RightDockWidgetArea)
+assert panel._io_splitter.orientation() == Qt.Orientation.Vertical, "右侧应上下分布"
+panel.set_layout_for_dock(Qt.DockWidgetArea.LeftDockWidgetArea)
+assert panel._io_splitter.orientation() == Qt.Orientation.Vertical, "左侧应上下分布"
+panel.set_layout_for_dock(Qt.DockWidgetArea.BottomDockWidgetArea)
+assert panel._io_splitter.orientation() == Qt.Orientation.Horizontal, "底部应左右分布"
+print("4) AI 提问/回答框布局自适应 OK（底部左右 / 两侧上下）")
+
 win.close()
 print("BOTTOM TABS CLEANED OK")

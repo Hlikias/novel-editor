@@ -1418,6 +1418,8 @@ class MainWindow(QMainWindow):
         self.ai_panel = AIPanel(self.config)
         self.ai_panel.current_editor_provider = self.current_editor
         self.ai_dock.setWidget(self.ai_panel)
+        # AI 面板 提问/回答 布局随 dock 位置自适应（底部=左右，两侧=上下）
+        self.ai_dock.dockLocationChanged.connect(self._on_ai_dock_moved)
 
         # ---- 右侧：统计视图 ----
         self.stats_dock = QDockWidget("📊 统计", self)
@@ -1642,6 +1644,13 @@ class MainWindow(QMainWindow):
         self._help_menu.addAction("⏱ 写作时间统计", lambda: self._activate_bottom_tab(self.time_view))
         self._help_menu.addSeparator()
         self._help_menu.addAction(self.outline_dock.toggleViewAction())
+
+    def _on_ai_dock_moved(self, area):
+        """AI dock 被拖到不同区域时，面板 提问/回答 框自适应布局。"""
+        try:
+            self.ai_panel.set_layout_for_dock(area)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _open_quote_search(self):
         from .dialogs.quote_search_dialog import QuoteSearchDialog
@@ -3552,6 +3561,12 @@ class MainWindow(QMainWindow):
                     self.addDockWidget(bottom, self.ai_dock)
                 self.splitDockWidget(self.ai_dock, self.log_dock, Qt.Orientation.Horizontal)
                 self.ai_dock.show()
+            except Exception:  # noqa: BLE001
+                pass
+        # 初始按 dock 位置设置 AI 面板 提问/回答 布局
+        if hasattr(self, "ai_panel"):
+            try:
+                self.ai_panel.set_layout_for_dock(self.dockWidgetArea(self.ai_dock))
             except Exception:  # noqa: BLE001
                 pass
 

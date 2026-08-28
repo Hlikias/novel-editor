@@ -9,10 +9,10 @@ import json
 import urllib.error
 import urllib.request
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import (
     QCheckBox, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
-    QPushButton, QVBoxLayout, QWidget,
+    QPushButton, QSplitter, QVBoxLayout, QWidget,
 )
 
 # 常见"模型名别名" → 规范模型名（用户常把服务名当作模型名填写，
@@ -165,7 +165,21 @@ class AIPanel(QWidget):
             "例如：帮我写一段主角在雨夜发现古剑的情节，500字左右……"
         )
         prompt_layout.addWidget(self.prompt_edit)
-        layout.addWidget(prompt_box, stretch=3)
+        # 输出
+        out_box = QGroupBox("AI 输出")
+        out_layout = QVBoxLayout(out_box)
+        self.output_edit = QPlainTextEdit()
+        self.output_edit.setReadOnly(True)
+        self.output_edit.setPlaceholderText("AI 生成的内容会显示在这里……")
+        out_layout.addWidget(self.output_edit)
+
+        # 提问/回答 框：随 dock 位置自适应方向（底部=左右分布，两侧=上下分布）
+        self._io_splitter = QSplitter()
+        self._io_splitter.addWidget(prompt_box)
+        self._io_splitter.addWidget(out_box)
+        self._io_splitter.setChildrenCollapsible(False)
+        self._io_splitter.setOrientation(Qt.Orientation.Vertical)   # 默认上下（两侧）
+        layout.addWidget(self._io_splitter, 1)
 
         # 按钮行
         btn_row = QHBoxLayout()
@@ -183,19 +197,25 @@ class AIPanel(QWidget):
         btn_row.addWidget(self.stream_check)
         layout.addLayout(btn_row)
 
-        # 输出
-        out_box = QGroupBox("AI 输出")
-        out_layout = QVBoxLayout(out_box)
-        self.output_edit = QPlainTextEdit()
-        self.output_edit.setReadOnly(True)
-        self.output_edit.setPlaceholderText("AI 生成的内容会显示在这里……")
-        out_layout.addWidget(self.output_edit)
-        layout.addWidget(out_box, stretch=4)
-
         # 状态
         self.status_label = QLabel("")
         self.status_label.setObjectName("mutedLabel")
         layout.addWidget(self.status_label)
+
+    # ---------- 布局自适应 ----------
+    def set_layout_for_dock(self, area) -> None:
+        """按 dock 区域切换 提问/回答 布局：底部/顶部=左右分布，左右两侧=上下分布。"""
+        try:
+            from PySide6.QtCore import Qt as _Qt
+            bottom_like = area in (
+                _Qt.DockWidgetArea.BottomDockWidgetArea,
+                _Qt.DockWidgetArea.TopDockWidgetArea,
+            )
+        except Exception:  # noqa: BLE001
+            bottom_like = False
+        self._io_splitter.setOrientation(
+            Qt.Orientation.Horizontal if bottom_like else Qt.Orientation.Vertical
+        )
 
     # ---------- 行为 ----------
     def _privacy_blocked(self) -> str:
