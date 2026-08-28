@@ -1260,8 +1260,8 @@ class MainWindow(QMainWindow):
 
         self.ai_panel.run_task(prompt, _on_ai, stream=False)
 
-    def _ai_preplan_write(self, data: dict, done_cb):
-        """把 AI 生成的前期设定写入项目（各规划表）。"""
+    def _ai_preplan_write(self, data: dict, progress_cb=None, done_cb=None):
+        """把 AI 生成的前期设定写入项目（各规划表），逐模块上报进度。"""
         try:
             import json as _json
             from .models import (Character, Foreshadow, NovelMap, PlotNode,
@@ -1270,8 +1270,14 @@ class MainWindow(QMainWindow):
             st = self.storage
             book = st.get_book()
             bid = book.id
+
+            def _step(msg: str):
+                if progress_cb:
+                    progress_cb(msg)
+
             n_chars = n_outline = n_fs = n_lines = n_nodes = n_pl = 0
             # 世界观（唯一；已存在时覆盖需确认）
+            _step("⏳ 写入 1/9：世界观…")
             wv = data.get("worldview") or {}
             if wv and wv.get("name"):
                 existing = st.get_single_worldview()
@@ -1296,7 +1302,9 @@ class MainWindow(QMainWindow):
                         attributes=str(wv.get("attributes", "")),
                     ))
             # 角色（同名跳过）
-            for c in data.get("characters") or []:
+            char_list = data.get("characters") or []
+            _step(f"⏳ 写入 2/9：角色（共 {len(char_list)} 位）…")
+            for c in char_list:
                 name = str(c.get("name", "")).strip()
                 if not name:
                     continue
@@ -1318,7 +1326,9 @@ class MainWindow(QMainWindow):
                 ))
                 n_chars += 1
             # 大纲节点
-            for i, n in enumerate(data.get("outline") or []):
+            outline_list = data.get("outline") or []
+            _step(f"⏳ 写入 3/9：大纲（{len(outline_list)} 节点）…")
+            for i, n in enumerate(outline_list):
                 name = str(n.get("name", "")).strip()
                 if not name:
                     continue
@@ -1330,6 +1340,7 @@ class MainWindow(QMainWindow):
                 ))
                 n_outline += 1
             # 伏笔
+            _step(f"⏳ 写入 4/9：伏笔（{len(data.get('foreshadows') or [])} 条）…")
             for f in data.get("foreshadows") or []:
                 name = str(f.get("name", "")).strip()
                 if not name:
@@ -1341,7 +1352,9 @@ class MainWindow(QMainWindow):
                 ))
                 n_fs += 1
             # 剧情线
-            for s in data.get("storylines") or []:
+            sl_list = data.get("storylines") or []
+            _step(f"⏳ 写入 5/9：剧情线（{len(sl_list)} 条）…")
+            for s in sl_list:
                 name = str(s.get("name", "")).strip()
                 if not name:
                     continue
@@ -1358,6 +1371,7 @@ class MainWindow(QMainWindow):
                         detail=str(nd.get("detail", "")), order=i + 1))
                     n_nodes += 1
             # 力量体系
+            _step(f"⏳ 写入 6/9：力量体系（{len(data.get('power_levels') or [])} 级）…")
             for i, pl in enumerate(data.get("power_levels") or []):
                 level = str(pl.get("level", "")).strip()
                 if not level:
@@ -1368,6 +1382,7 @@ class MainWindow(QMainWindow):
                     description=str(pl.get("description", "")), order=i + 1))
                 n_pl += 1
             # 科技树
+            _step(f"⏳ 写入 7/9：科技树（{len(data.get('tech_nodes') or [])} 项）…")
             for i, tn in enumerate(data.get("tech_nodes") or []):
                 name = str(tn.get("name", "")).strip()
                 if not name:
@@ -1377,6 +1392,7 @@ class MainWindow(QMainWindow):
                     deps=str(tn.get("deps", "")),
                     description=str(tn.get("description", "")), order=i + 1))
             # 时间线
+            _step(f"⏳ 写入 8/9：时间线（{len(data.get('timeline') or [])} 事件）…")
             for i, ev in enumerate(data.get("timeline") or []):
                 title = str(ev.get("title", "")).strip()
                 if not title:
@@ -1386,11 +1402,13 @@ class MainWindow(QMainWindow):
                     characters=str(ev.get("characters", "")),
                     result=str(ev.get("result", "")), order=i + 1))
             # 地图
+            _step(f"⏳ 写入 9/9：地图（{len(data.get('maps') or [])} 张）…")
             for m in data.get("maps") or []:
                 name = str(m.get("name", "")).strip()
                 if not name:
                     continue
                 st.add_map(NovelMap(book_id=bid, name=name))
+            _step("✅ 写入 9/9 完成，正在刷新界面…")
             self._refresh_chapter_dock()
             self._sync_planning_features()
             self.log(

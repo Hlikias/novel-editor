@@ -99,8 +99,12 @@ write_data = {
     "maps": [{"name": "九州地图", "desc": "宗门分布"}],
 }
 fired = []
-win._ai_preplan_write(write_data, fired.append)
+progress_log = []
+win._ai_preplan_write(write_data, progress_log.append, fired.append)
 check("写入回调无错误", fired == [None])
+check("写入有分步进度", len(progress_log) >= 9 and any("1/9" in m for m in progress_log)
+      and any("9/9" in m for m in progress_log))
+check("进度含模块名", any("世界观" in m for m in progress_log) and any("角色" in m for m in progress_log))
 check("世界观已写入", st.get_single_worldview() is not None
       and st.get_single_worldview().name == "九州")
 check("角色已写入 2 个", len(st.list_characters()) == 2)

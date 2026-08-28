@@ -173,22 +173,25 @@ class AIPreplanDialog(GradientDialog):
         self._busy = True
         self.gen_btn.setEnabled(False)
         self.write_btn.setEnabled(False)
-        self.status.setText("⏳ AI 正在生成前期设定（内容较多，请稍候）…")
+        n = len(p["modules"])
+        self.status.setText(
+            f"⏳ 步骤 1/2：AI 正在生成前期设定（共 {n} 个模块，内容较多，请稍候 1~3 分钟）…")
         self.on_generate(p, self._done)
 
     def _done(self, data, err):
         self._busy = False
         self.gen_btn.setEnabled(True)
         if err:
-            self.status.setText(f"❌ {err}")
+            self.status.setText(f"❌ 生成失败（步骤 1/2）：{err}")
             return
         if not isinstance(data, dict):
-            self.status.setText("❌ AI 返回格式无法解析")
+            self.status.setText("❌ 生成失败（步骤 1/2）：AI 返回格式无法解析")
             return
         self._data = data
         self.result_edit.setPlainText(_summarize(data))
         self.write_btn.setEnabled(True)
-        self.status.setText("✅ 已生成，确认后点「写入项目」")
+        self.status.setText("✅ 步骤 2/2：前期设定已生成，点「写入项目」分步写入")
+        self.result_edit.setFocus()
 
     def _write(self):
         if self._busy or self._data is None:
@@ -198,8 +201,12 @@ class AIPreplanDialog(GradientDialog):
             return
         self._busy = True
         self.write_btn.setEnabled(False)
-        self.status.setText("⏳ 正在写入项目…")
-        self.on_write(self._data, self._write_done)
+        self.status.setText("⏳ 正在写入项目（步骤 1/1）…")
+        self.on_write(self._data, self._progress, self._write_done)
+
+    def _progress(self, msg: str):
+        """写入阶段的分步进度提示（由主窗口逐模块调用）。"""
+        self.status.setText(msg)
 
     def _write_done(self, err):
         self._busy = False
@@ -207,7 +214,7 @@ class AIPreplanDialog(GradientDialog):
         if err:
             self.status.setText(f"❌ 写入失败：{err}")
         else:
-            self.status.setText("✅ 前期设定已写入项目（可在 设定管理/创作规划 中查看）")
+            self.status.setText("✅ 写入完成，自动打开 设定管理 / 创作规划 查看")
             self.write_btn.setEnabled(False)
 
 
