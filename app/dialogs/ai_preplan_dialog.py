@@ -4,6 +4,7 @@
 AI 调用与写入动作通过回调注入（由主窗口实现）。"""
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
     QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
@@ -92,42 +93,26 @@ class AIPreplanDialog(GradientDialog):
         form.addRow("核心冲突", self.conflict_edit)
         body.addLayout(form)
 
-        # 生成模块：checkbox + 可编辑 combo（用户指定该模块要求）
-        body.addWidget(QLabel("生成模块（可勾选模块并在右侧指定要求）"))
+        # 生成模块：一个一行，checkbox + 多行 TextEdit（可详细描述要求）
+        body.addWidget(QLabel("生成模块（勾选 + 详细描述要求，描述越具体生成越贴合）"))
         mod_grid = QVBoxLayout()
         self.module_checks: dict[str, QCheckBox] = {}
-        self.module_specs: dict[str, QComboBox] = {}
-        row_widgets: list[QWidget] = []
+        self.module_specs: dict[str, QPlainTextEdit] = {}
         for key, label, opts in MODULES:
-            cell = QWidget()
-            cl = QHBoxLayout(cell)
-            cl.setContentsMargins(0, 0, 0, 0)
+            row = QWidget()
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(6)
             cb = QCheckBox(label)
             cb.setChecked(True)
-            spec = QComboBox()
-            spec.setEditable(True)
-            spec.setMinimumWidth(190)
-            spec.addItem("（默认设计）")
-            spec.addItems(opts)
-            spec.setToolTip("可输入自定义要求，如世界观：灵气复苏+宗门林立")
-            cl.addWidget(cb)
-            cl.addWidget(spec, 1)
+            te = QPlainTextEdit()
+            te.setFixedHeight(52)
+            te.setPlaceholderText("详细描述该模块要求（可选）。例如：" + "；".join(opts[:2]) + "…")
+            rl.addWidget(cb, 0, Qt.AlignTop)
+            rl.addWidget(te, 1)
             self.module_checks[key] = cb
-            self.module_specs[key] = spec
-            row_widgets.append(cell)
-            if len(row_widgets) == 3:
-                rl = QHBoxLayout()
-                for c in row_widgets:
-                    rl.addWidget(c)
-                rl.addStretch(1)
-                mod_grid.addLayout(rl)
-                row_widgets = []
-        if row_widgets:
-            rl = QHBoxLayout()
-            for c in row_widgets:
-                rl.addWidget(c)
-            rl.addStretch(1)
-            mod_grid.addLayout(rl)
+            self.module_specs[key] = te
+            mod_grid.addWidget(row)
         body.addLayout(mod_grid)
 
         # 按钮
@@ -158,9 +143,7 @@ class AIPreplanDialog(GradientDialog):
         for key, cb in self.module_checks.items():
             if not cb.isChecked():
                 continue
-            spec = self.module_specs[key].currentText().strip()
-            if spec in ("", "（默认设计）"):
-                spec = ""
+            spec = self.module_specs[key].toPlainText().strip()
             mods.append({"key": key, "spec": spec})
         return {
             "title": self.title_edit.text().strip(),

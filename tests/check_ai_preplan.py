@@ -63,11 +63,11 @@ p = dlg.params()
 check("弹窗参数收集", p["title"] == "剑与星辰" and p["genre"] == "玄幻"
       and p["style"] == "穿越+搞笑")
 check("模块含指定项", any(m["key"] == "worldview" for m in p["modules"]))
-dlg.module_specs["worldview"].setEditText("灵气复苏+宗门林立")
+dlg.module_specs["worldview"].setPlainText("灵气复苏+宗门林立，主角是穿越者")
 dlg.module_checks["maps"].setChecked(False)
 p2 = dlg.params()
 spec_map = {m["key"]: m["spec"] for m in p2["modules"]}
-check("模块指定生效", spec_map.get("worldview") == "灵气复苏+宗门林立")
+check("模块指定生效", spec_map.get("worldview") == "灵气复苏+宗门林立，主角是穿越者")
 check("取消后模块排除", "maps" not in spec_map)
 check("默认指定为空", all(m["spec"] == "" for m in p2["modules"] if m["key"] != "worldview"))
 dlg.deleteLater()
