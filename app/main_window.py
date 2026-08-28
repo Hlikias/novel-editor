@@ -467,22 +467,22 @@ class MainWindow(QMainWindow):
         self._add_action(create_menu, "＋ 新建项目…", self.new_project, "Ctrl+N", None)
         create_menu.addSeparator()
         self._new_chapter_action = self._add_action(create_menu, "📄 新建章节", self.new_chapter, None, None)
-        self._add_action(create_menu, "🌍 新建世界观…", lambda: self.show_character_dialog(1), None, None)
-        self._add_action(create_menu, "👤 新建角色…", lambda: self.show_character_dialog(2), None, None)
-        self._add_action(create_menu, "⚔ 新建武器…", lambda: self.show_character_dialog(3), None, None)
-        self._add_action(create_menu, "📐 新建设定…", lambda: self.show_character_dialog(4), None, None)
+        self._worldview_action = self._add_action(create_menu, "🌍 新建世界观…", lambda: self.show_character_dialog(1), None, None)
+        self._character_action = self._add_action(create_menu, "👤 新建角色…", lambda: self.show_character_dialog(2), None, None)
+        self._weapon_action = self._add_action(create_menu, "⚔ 新建武器…", lambda: self.show_character_dialog(3), None, None)
+        self._attr_action = self._add_action(create_menu, "📐 新建设定…", lambda: self.show_character_dialog(4), None, None)
         create_menu.addSeparator()
         self._add_action(create_menu, "📝 新建便签…", self._create_note_action, None, None)
         self._add_action(create_menu, "✨ 记录灵感…", self.show_quick_note_dialog, "Ctrl+Shift+I", None)
         create_menu.addSeparator()
-        self._add_action(create_menu, "🪝 新建伏笔", lambda: self._planning_new("foreshadow"), None, None)
+        self._foreshadow_action = self._add_action(create_menu, "🪝 新建伏笔", lambda: self._planning_new("foreshadow"), None, None)
         self._card_action = self._add_action(create_menu, "📇 新建章节卡片", lambda: self._planning_new("card"), None, None)
-        self._add_action(create_menu, "📈 新建剧情线", lambda: self._planning_new("storyline"), None, None)
+        self._storyline_action = self._add_action(create_menu, "📈 新建剧情线", lambda: self._planning_new("storyline"), None, None)
         self._ai_gen_action = self._add_action(create_menu, "✍️ AI 生成章节…", self._show_chapter_gen_dialog, None, None)
         create_menu.addSeparator()
-        self._add_action(create_menu, "🗺 新建地图", lambda: self._show_character_tab("map"), None, None)
-        self._add_action(create_menu, "🧩 新建自定义模块", lambda: self._show_character_tab("modules"), None, None)
-        self._add_action(create_menu, "📑 新建大纲节点", lambda: self._show_character_tab("outline"), None, None)
+        self._map_action = self._add_action(create_menu, "🗺 新建地图", lambda: self._show_character_tab("map"), None, None)
+        self._module_action = self._add_action(create_menu, "🧩 新建自定义模块", lambda: self._show_character_tab("modules"), None, None)
+        self._outline_action = self._add_action(create_menu, "📑 新建大纲节点", lambda: self._show_character_tab("outline"), None, None)
         self._menus.append(("创建", create_menu))
 
         # ---- 编辑 ----
@@ -512,8 +512,9 @@ class MainWindow(QMainWindow):
         self._chapter_mgr_action = self._add_action(project_menu, "🗂 章节管理…", self.show_chapter_dialog, "Ctrl+Shift+C", None)
         self._add_action(project_menu, "📛 取名器…", self._show_name_dialog, None, None)
         self._add_action(project_menu, "🗑 回收站…", self._show_recycle_dialog, None, None)
-        self._add_action(project_menu, "👥 大纲 / 世界观 / 角色管理…", self.show_character_dialog, "Ctrl+Shift+R", None)
-        self._add_action(project_menu, "📐 创作规划（伏笔/章节卡片/体系/剧情线/时间线）", lambda: self._show_planning_dialog(True), "Ctrl+Shift+P", None)
+        self._char_mgr_action = self._add_action(project_menu, "👥 大纲 / 世界观 / 角色管理…", self.show_character_dialog, "Ctrl+Shift+R", None)
+        self._planning_action = self._add_action(project_menu, "📐 创作规划（伏笔/章节卡片/体系/剧情线/时间线）", lambda: self._show_planning_dialog(True), "Ctrl+Shift+P", None)
+        self._usage_action = self._add_action(project_menu, "📊 设定利用率报告…", self._show_setting_usage, None, None)
         project_menu.addSeparator()
         self._add_action(project_menu, "📊 统计视图", self.show_stats_view, None, None)
         self._add_action(project_menu, "🕵️ 错别字/违禁词检查", lambda: self._activate_bottom_tab(self.check_view), None, None)
@@ -1165,6 +1166,32 @@ class MainWindow(QMainWindow):
         unit = "章" if self._is_serial() else "篇"
         return f"《{prev.title}》（上一篇结尾）：\n{tail}" if unit == "篇" else f"《{prev.title}》（上一章结尾）：\n{tail}"
 
+    def _current_chapter_card(self):
+        """当前打开章节的章节卡片（无则 None）。"""
+        if self.storage is None:
+            return None
+        editor = self.current_editor()
+        cid = getattr(editor, "chapter_id", None) if editor is not None else None
+        if not cid:
+            return None
+        try:
+            for c in self.storage.list_chapter_cards():
+                if c.chapter_id == cid:
+                    return c
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+    # ---------- 设定利用率报告 ----------
+    def _show_setting_usage(self):
+        """统计角色/地点/伏笔在正文中的使用情况，标出未使用的设定。"""
+        if self.storage is None:
+            QMessageBox.information(self, "提示", "请先打开项目。")
+            return
+        from .dialogs.usage_dialog import UsageDialog
+        dlg = UsageDialog(self.storage, self)
+        dlg.exec()
+
     def _gen_chapter_prompt(self, req: dict, prev_tail: str, book_title: str,
                             context: str = "") -> str:
         """生成正文 prompt：长篇小说=章节正文；非长篇=独立文章（散文/短篇/作文/论文等）。"""
@@ -1175,6 +1202,21 @@ class MainWindow(QMainWindow):
             parts = [f"你是一位资深中文写作者。请为《{book_title}》撰写一篇完整的{btype}正文。"]
         if context:
             parts.append("【全书设定（参考）】角色/世界观/大纲如下，人物名与设定须与之一致：\n" + context)
+        # AI 按本章卡片写作（长篇）：注入当前章节卡片的 目标/冲突/转折/钩子 作为约束
+        if self._is_serial():
+            card = self._current_chapter_card()
+            if card is not None:
+                bits = []
+                if card.goal:
+                    bits.append(f"目标：{card.goal}")
+                if card.conflict:
+                    bits.append(f"冲突：{card.conflict}")
+                if card.twist:
+                    bits.append(f"转折：{card.twist}")
+                if card.hook:
+                    bits.append(f"钩子：{card.hook}")
+                if bits:
+                    parts.append("【本章写作目标（章节卡片，正文须围绕其展开）】" + "；".join(bits))
         if prev_tail:
             prev_label = "【上一章回顾】" if self._is_serial() else "【上一篇回顾】"
             parts.append(prev_label + "须承接以下内容与文风，保持视角与人物称谓一致：\n" + prev_tail)
@@ -1706,10 +1748,11 @@ class MainWindow(QMainWindow):
             tb.addSeparator()
 
         # ── 章节与设定 ──
-        add("🆕 新建章节", self.new_chapter, "🆕")
-        add("🗂 章节管理…", self.show_chapter_dialog, "🗂")
-        add("👥 大纲 / 世界观 / 角色管理…", self.show_character_dialog, "👥")
-        add("📐 创作规划…", lambda: self._show_planning_dialog(True), "📐")
+        self._tb_actions: dict[str, QAction] = {}
+        self._tb_actions["new_chapter"] = add("🆕 新建章节", self.new_chapter, "🆕")
+        self._tb_actions["chapter_mgr"] = add("🗂 章节管理…", self.show_chapter_dialog, "🗂")
+        self._tb_actions["character"] = add("👥 大纲 / 世界观 / 角色管理…", self.show_character_dialog, "👥")
+        self._tb_actions["planning"] = add("📐 创作规划…", lambda: self._show_planning_dialog(True), "📐")
         sep()
         # ── AI 写作 ──
         self._tb_ai_gen_action = add("📖 AI 生成章节…", self._show_chapter_gen_dialog, "📖")
@@ -2136,9 +2179,64 @@ class MainWindow(QMainWindow):
             text = "📖 AI 生成章节…" if serial else "📝 AI 生成文章…"
             self._tb_ai_gen_action.setText(text)
             self._tb_ai_gen_action.setToolTip(text)
+        if self._tb_actions.get("new_chapter"):
+            self._tb_actions["new_chapter"].setText("🆕 新建章节" if serial else "🆕 新建文章")
+        if self._tb_actions.get("chapter_mgr"):
+            self._tb_actions["chapter_mgr"].setText("🗂 章节管理…" if serial else "🗂 文章管理…")
         if hasattr(self, "chapter_list_view"):
             self.chapter_list_view.set_title("章节速查" if serial else "文章速查")
+        self._sync_planning_features()
         self._update_status()
+
+    # ---------- 前期规划功能按体裁适配 ----------
+    def _planning_level(self) -> int:
+        """前期规划功能级别：2=长篇小说（全部）；1=短篇小说（角色/世界观/大纲等）；
+        0=散文/杂文/作文/论文等（无设定集/地图/伏笔/卡片等长篇功能）。"""
+        try:
+            bt = self.storage.get_book().book_type if self.storage else "长篇小说"
+        except Exception:  # noqa: BLE001
+            bt = "长篇小说"
+        if bt == "长篇小说":
+            return 2
+        if bt == "短篇小说":
+            return 1
+        return 0
+
+    def _sync_planning_features(self):
+        """按体裁显隐前期规划入口（菜单/工具栏/左侧 dock），尊重突发灵感不强制章节。"""
+        lvl = self._planning_level()
+        has_char = lvl >= 1      # 角色/世界观/武器/设定/地图/模块/大纲
+        has_plan = lvl >= 2      # 伏笔/章节卡片/剧情线/创作规划（长篇专属）
+        for act, on in (
+            (getattr(self, "_worldview_action", None), has_char),
+            (getattr(self, "_character_action", None), has_char),
+            (getattr(self, "_weapon_action", None), has_char),
+            (getattr(self, "_attr_action", None), has_char),
+            (getattr(self, "_map_action", None), has_char),
+            (getattr(self, "_module_action", None), has_char),
+            (getattr(self, "_outline_action", None), has_char),
+            (getattr(self, "_foreshadow_action", None), has_plan),
+            (getattr(self, "_card_action", None), has_plan),
+            (getattr(self, "_storyline_action", None), has_plan),
+            (getattr(self, "_char_mgr_action", None), has_char),
+            (getattr(self, "_planning_action", None), has_plan),
+            (getattr(self, "_usage_action", None), has_char),
+        ):
+            if act is not None:
+                act.setVisible(on)
+        for key, on in (
+            ("new_chapter", self._is_serial()),
+            ("chapter_mgr", True),
+            ("character", has_char),
+            ("planning", has_plan),
+        ):
+            act = self._tb_actions.get(key)
+            if act is not None:
+                act.setVisible(on)
+        # 左侧 dock：大纲/总览 仅角色级及以上显示（散文无大纲概念）
+        for d in (getattr(self, "outline_dock", None), getattr(self, "overview_dock", None)):
+            if d is not None:
+                d.setVisible(lvl >= 1)
 
     def new_chapter(self):
         if self.storage is None:
@@ -3500,18 +3598,68 @@ class MainWindow(QMainWindow):
         return self._terms_cache
 
     def _line_setting_hits(self, editor) -> str:
-        """当前行命中设定词 → tips 文本（空串=无命中）。"""
+        """当前行辅助提示组合：设定词命中 + 人名疑似写错 + 伏笔回收提醒。"""
         if self.storage is None or editor is None:
             return ""
         line = editor.current_line_text()
         if not line:
             return ""
+        parts = []
         found = [(w, k) for w, (k, _d) in self._setting_terms().items()
                  if w and w in line]
+        if found:
+            parts.append("⚡ 命中设定：" + " · ".join(
+                f"{w}（{k}）" for w, k in found[:4]))
+        typo = self._line_typo_hints(line)
+        if typo:
+            parts.append("⚠ " + typo)
+        fs = self._line_foreshadow_hints(line)
+        if fs:
+            parts.append("🪝 " + fs)
+        return "  ".join(parts)
+
+    def _line_typo_hints(self, line: str) -> str:
+        """人名写错实时提示：行内疑似人名与角色库编辑距离≤1 时提示『X』疑似『Y』。"""
+        if self._planning_level() < 1:
+            return ""
+        names = {w for w, (k, _d) in self._setting_terms().items() if k == "角色"}
+        if not names:
+            return ""
+        import re
+        from .ai_check import _lev
+        found: list[tuple[str, str]] = []
+        for seg in re.findall(r"[\u4e00-\u9fff]+", line):
+            for L in (2, 3, 4):
+                for i in range(max(0, len(seg) - L + 1)):
+                    sub = seg[i:i + L]
+                    if sub in names:
+                        continue
+                    for n in names:
+                        if len(n) > 4 or len(n) < 2:
+                            continue
+                        if abs(len(sub) - len(n)) <= 1 and _lev(sub, n) <= 1:
+                            if (sub, n) not in found:
+                                found.append((sub, n))
+                            break
         if not found:
             return ""
-        parts = [f"{w}（{k}）" for w, k in found[:4]]
-        return "⚡ 命中设定：" + " · ".join(parts)
+        return " · ".join(f"『{a}』疑似『{b}』" for a, b in found[:3])
+
+    def _line_foreshadow_hints(self, line: str) -> str:
+        """伏笔回收提醒（长篇）：当前行命中伏笔名时提示埋设/回收章节。"""
+        if self._planning_level() < 2 or self.storage is None:
+            return ""
+        out: list[str] = []
+        try:
+            for f in self.storage.list_foreshadows():
+                name = (f.name or "").strip()
+                if name and name in line:
+                    loc = (f"埋:{f.plant_chapter}" if f.plant_chapter else "")
+                    loc += (f"收:{f.harvest_chapter}" if f.harvest_chapter else "")
+                    out.append(f"伏笔『{name}』（{loc}）" if loc else f"伏笔『{name}』")
+        except Exception:  # noqa: BLE001
+            pass
+        return " · ".join(out[:3])
 
     def _update_status(self):
         if self.storage is not None:
