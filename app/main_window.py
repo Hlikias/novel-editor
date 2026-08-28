@@ -449,6 +449,8 @@ class MainWindow(QMainWindow):
         self._add_action(file_menu, "全部保存", self.save_all_open_chapters, "Ctrl+Shift+S", None)
         self._add_action(file_menu, "导出当前章节为文本…", self.export_current_chapter, None, "SP_DialogSaveButton")
         self._add_action(file_menu, "导出全部章节…", self.export_all_chapters, None, None)
+        self._add_action(file_menu, "📄 导出为 Word（格式设置）…", self.export_current_docx, None, None)
+        self._add_action(file_menu, "📋 按范本导出（AI）…", self._show_template_export_dialog, None, None)
         self._add_action(file_menu, "导出全书合订本…", self.export_combined, None, None)
         self._add_action(file_menu, "📤 导出网文格式…", self.export_webnovel, None, None)
         self._add_action(file_menu, "导出项目信息 JSON…", self.export_project_json, None, None)
@@ -2515,12 +2517,150 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            export(path, editor.content(), fmt, title=ch_title, encoding=encoding)
+            if fmt == "docx":
+                done = self._export_docx_with_format(path, editor.content(), ch_title)
+                if not done:
+                    return
+            else:
+                export(path, editor.content(), fmt, title=ch_title, encoding=encoding)
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "导出失败", f"{e}")
             self.log(f"导出失败: {e}", "error")
             return
         self.log(f"已导出（{fmt.upper()}）: {path}", "ok")
+
+    # ---------- Word 格式导出 ----------
+    def export_current_docx(self):
+        """导出当前文章为 Word：弹格式设置（记住后可跳过），按格式生成 docx。"""
+        editor = self.current_editor()
+        if editor is None:
+            QMessageBox.information(self, "提示", "没有打开的文章。")
+            return
+        ch_title = ""
+        cid = getattr(editor, "chapter_id", None)
+        if cid is not None and self.storage is not None:
+            ch = self.storage.get_chapter(cid)
+            ch_title = ch.title if ch else ""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出为 Word", os.path.join(os.path.expanduser("~"), f"{ch_title or '文章'}.docx"),
+            "Word 文档 (*.docx)",
+        )
+        if not path:
+            return
+        try:
+            self._export_docx_with_format(path, editor.content(), ch_title)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "导出失败", f"{e}")
+            self.log(f"导出失败: {e}", "error")
+            return
+
+    def _export_docx_with_format(self, path: str, text: str, title: str) -> bool:
+        """docx 导出：按配置/弹窗选择的格式生成（可记住设置）。返回是否完成导出。"""
+        from .dialogs.export_format_dialog import ExportFormatDialog
+        from .docx_export import DocFormat, export_docx_formatted
+        exp = self.config.setdefault("export", {})
+        remembered = bool(exp.get("docx_format_remembered"))
+        fmt = DocFormat.from_config(exp.get("docx_format"))
+        if not remembered:
+            dlg = ExportFormatDialog(self, current=fmt, remembered=remembered)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return False
+            fmt = dlg.fmt()
+            if dlg.remember():
+                exp["docx_format"] = fmt.to_config()
+                exp["docx_format_remembered"] = True
+                save_config(self.config)
+        export_docx_formatted(path, text, title, fmt)
+        self.log(f"已导出 Word（{fmt.describe()}）: {path}", "ok")
+        return True
+
+    # ---------- 按范本导出（AI） ----------
+    def _show_template_export_dialog(self):
+        if not hasattr(self, "_tpl_export_dialog") or self._tpl_export_dialog is None:
+            from .dialogs.template_export_dialog import TemplateExportDialog
+            self._tpl_export_dialog = TemplateExportDialog(self, on_export=self._tpl_export)
+        self._tpl_export_dialog.show()
+        self._tpl_export_dialog.raise_()
+        self._tpl_export_dialog.activateWindow()
+
+    def _tpl_export(self, mode: str, text: str, fmt, words: int,
+                    extra: str, done_cb):
+        """按范本导出：plain=直接排版；ai_gen/ai_polish=AI 处理后按范本格式导出。"""
+        if mode == "plain":
+            title = self._current_ch_title()
+            self._tpl_save_docx(text, fmt, done_cb, title=title)
+            return
+        if mode == "ai_gen":
+            prompt = (
+                "你是一位资深中文写作者。请按用户要求写一篇文章。\n"
+                f"【排版规范（程序将按范本套用，你只需输出标题与正文）】\n{fmt.describe()}\n"
+                f"【写作要求】\n{text}\n"
+                f"【目标字数】约 {int(words)} 字\n"
+                f"【附加要求】{extra if extra else '无'}\n"
+                "【输出要求】\n"
+                "1. 第一行输出文章标题；\n"
+                "2. 第二行起为正文，自然分段，段落间用空行分隔；\n"
+                "3. 不要输出任何解释性文字、不要用 Markdown 符号。"
+            )
+        else:   # ai_polish
+            prompt = (
+                "你是资深中文编辑。请润色以下文章：保持原意与整体结构，改进语言表达、"
+                "修正语病与用词，使其更流畅优美。\n"
+                f"【排版规范（程序将按范本套用，你只需输出标题与正文）】\n{fmt.describe()}\n"
+                f"【附加要求】{extra if extra else '无'}\n"
+                "【原文】\n" + text + "\n"
+                "【输出要求】第一行输出标题，第二行起为正文，自然分段（空行分段），"
+                "不要解释性文字、不要用 Markdown 符号。"
+            )
+        self.log("AI 按范本处理中…", "info")
+
+        def _ai_done(out, err):
+            if err:
+                done_cb(str(err))
+                return
+            if out and str(out).strip():
+                self._tpl_save_docx(str(out), fmt, done_cb, title=None)
+            else:
+                done_cb("AI 未返回内容")
+
+        self.ai_panel.run_task(prompt, _ai_done, stream=False)
+
+    def _current_ch_title(self) -> str:
+        editor = self.current_editor()
+        cid = getattr(editor, "chapter_id", None) if editor is not None else None
+        if cid is not None and self.storage is not None:
+            ch = self.storage.get_chapter(cid)
+            return ch.title if ch else ""
+        return ""
+
+    def _tpl_save_docx(self, text: str, fmt, done_cb, title: str | None = None):
+        """按范本格式导出 docx：title 为空时取文本首行作为标题。"""
+        from .docx_export import export_docx_formatted
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出为 Word（按范本格式）",
+            os.path.join(os.path.expanduser("~"), "按范本导出.docx"),
+            "Word 文档 (*.docx)",
+        )
+        if not path:
+            done_cb("已取消")
+            return
+        lines = [ln for ln in text.replace("\r\n", "\n").split("\n")]
+        if not title:
+            idx = next((i for i, ln in enumerate(lines) if ln.strip()), None)
+            if idx is not None:
+                title = lines[idx].strip()
+                body = "\n".join(lines[idx + 1:])
+            else:
+                title, body = "", ""
+        else:
+            body = text
+        try:
+            export_docx_formatted(path, body, title=title, fmt=fmt)
+            self.log(f"已按范本导出 Word: {path}", "ok")
+            done_cb(None)
+        except Exception as e:  # noqa: BLE001
+            self.log(f"按范本导出失败: {e}", "error")
+            done_cb(str(e))
 
     def _edit_op(self, op: str):
         editor = self.current_editor()
