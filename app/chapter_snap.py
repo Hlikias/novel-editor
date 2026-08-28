@@ -55,7 +55,8 @@ def chapter_matches(plan_text: str, chapter_title: str) -> bool:
 
 def chapter_snap_data(storage, chapter_id: int, chapter_title: str) -> dict:
     """汇总当前章节的规划信息。storage 为空或章节未保存时返回空结构。"""
-    out = {"card": None, "foreshadows": [], "nodes": [], "characters": []}
+    out = {"card": None, "foreshadows": [], "nodes": [], "characters": [],
+           "setting_hits": []}
     if storage is None or chapter_id <= 0:
         return out
     try:
@@ -71,12 +72,40 @@ def chapter_snap_data(storage, chapter_id: int, chapter_title: str) -> dict:
         for n in storage.list_storyline_nodes():
             if chapter_matches(n.chapter, chapter_title):
                 out["nodes"].append(n)
+        # 相关设定：本章正文命中 角色/地点/势力/世界观 词表
+        try:
+            ch = storage.get_chapter(chapter_id)
+            body = (ch.content or "") if ch else ""
+            plain = _strip_html(body)[:2000]
+            terms = storage.setting_terms()
+            seen: set[str] = set()
+            for word, (kind, desc) in terms.items():
+                if word and word in plain and word not in seen:
+                    seen.add(word)
+                    out["setting_hits"].append({"word": word, "kind": kind, "desc": desc})
+                    if len(out["setting_hits"]) >= 8:
+                        break
+        except Exception:  # noqa: BLE001
+            pass
     except Exception:  # noqa: BLE001
         pass
     card = out["card"]
     if card is not None and card.characters:
         out["characters"] = [c.strip() for c in card.characters.split(",") if c.strip()]
     return out
+
+
+def _strip_html(text: str) -> str:
+    """富文本 HTML → 纯文本（用于命中扫描）。"""
+    if "<" not in text:
+        return text
+    try:
+        from PySide6.QtGui import QTextDocument
+        doc = QTextDocument()
+        doc.setHtml(text)
+        return doc.toPlainText()
+    except Exception:  # noqa: BLE001
+        return text
 
 
 def format_snap(data: dict, chapter_title: str = "") -> str:
@@ -120,6 +149,11 @@ def format_snap(data: dict, chapter_title: str = "") -> str:
         lines.append("")
         lines.append("👥 出场人物")
         lines.append("、".join(chars))
+    hits = data.get("setting_hits") or []
+    if hits:
+        lines.append("")
+        lines.append("⚡ 相关设定")
+        lines.append(" · ".join(f"{h['word']}（{h['kind']}）" for h in hits))
     if not lines:
         lines.append("（当前章节暂无规划信息）")
     return "\n".join(lines)

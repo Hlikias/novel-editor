@@ -304,6 +304,16 @@ class AIPanel(QWidget):
             style = str(ident.get("preferences") or "").strip()
             if style:
                 parts.append("【写作风格（写作时遵循）】" + style)
+        if ai_cfg.get("global_book_context", False):
+            # 全书设定（写作上下文）：由主窗口注入 provider（勾选=作者同意随请求发送）
+            provider = getattr(self, "book_context_provider", None)
+            if provider:
+                try:
+                    ctx = str(provider() or "").strip()
+                    if ctx:
+                        parts.append("【全书设定（写作上下文）】" + ctx)
+                except Exception:  # noqa: BLE001
+                    pass
         return "\n".join(p for p in parts if p.strip())
 
     # ---------- 行为 ----------

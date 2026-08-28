@@ -715,6 +715,9 @@ class MainWindow(QMainWindow):
         self.editor_pos_label = QLabel("行 1, 列 1")
         self.editor_mod_label = QLabel("")
         self.editor_mod_label.setObjectName("esMod")
+        self.editor_tips_label = QLabel("")
+        self.editor_tips_label.setObjectName("esTips")
+        self.editor_tips_label.setStyleSheet("color:#A8842F;")
         for w in (self.editor_this_label, self.editor_para_label, self.editor_total_label,
                   self.editor_today_label, self.editor_pos_label):
             w.setObjectName("mutedLabel")
@@ -723,6 +726,7 @@ class MainWindow(QMainWindow):
         es.addWidget(self.editor_para_label)
         es.addWidget(self.editor_total_label)
         es.addWidget(self.editor_today_label)
+        es.addWidget(self.editor_tips_label)
         es.addStretch(1)
         es.addWidget(self.editor_pos_label)
         es.addWidget(self.editor_mod_label)
@@ -1418,6 +1422,7 @@ class MainWindow(QMainWindow):
         self.ai_dock.setMinimumSize(220, 0)
         self.ai_panel = AIPanel(self.config)
         self.ai_panel.current_editor_provider = self.current_editor
+        self.ai_panel.book_context_provider = self._book_context
         self.ai_dock.setWidget(self.ai_panel)
         # AI 面板 提问/回答 布局随 dock 位置自适应（底部=左答右输入，两侧=上输入下回答）
         self.ai_dock.dockLocationChanged.connect(self._on_ai_dock_moved)
@@ -3481,6 +3486,33 @@ class MainWindow(QMainWindow):
         self._refresh_recent_menu()
 
     # ================= 状态栏 =================
+    def _setting_terms(self) -> dict:
+        """当前项目设定词表（按项目缓存，项目切换时重建）。"""
+        if self.storage is None:
+            return {}
+        sid = id(self.storage)
+        if getattr(self, "_terms_cache_id", None) != sid:
+            try:
+                self._terms_cache = self.storage.setting_terms()
+            except Exception:  # noqa: BLE001
+                self._terms_cache = {}
+            self._terms_cache_id = sid
+        return self._terms_cache
+
+    def _line_setting_hits(self, editor) -> str:
+        """当前行命中设定词 → tips 文本（空串=无命中）。"""
+        if self.storage is None or editor is None:
+            return ""
+        line = editor.current_line_text()
+        if not line:
+            return ""
+        found = [(w, k) for w, (k, _d) in self._setting_terms().items()
+                 if w and w in line]
+        if not found:
+            return ""
+        parts = [f"{w}（{k}）" for w, k in found[:4]]
+        return "⚡ 命中设定：" + " · ".join(parts)
+
     def _update_status(self):
         if self.storage is not None:
             try:
@@ -3535,6 +3567,7 @@ class MainWindow(QMainWindow):
             self.editor_today_label.setText(f"✍️ 今日 {today_words}/{goal} 字")
             self.editor_pos_label.setText(editor.current_position_text())
             self.editor_mod_label.setText("● 未保存" if editor.document().isModified() else "✓ 已保存")
+            self.editor_tips_label.setText(self._line_setting_hits(editor))
         else:
             self.pos_label.setText("行 1, 列 1")
             self.words_label.setText(f"本{unit} 0 字")
@@ -3562,6 +3595,7 @@ class MainWindow(QMainWindow):
             self.editor_today_label.setText(f"✍️ 今日 {today_words}/{goal} 字")
             self.editor_pos_label.setText("行 1, 列 1")
             self.editor_mod_label.setText("")
+            self.editor_tips_label.setText("")
 
     # ================= 关闭 =================
     # ---------- 窗口状态记忆 ----------

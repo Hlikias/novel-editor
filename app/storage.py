@@ -575,6 +575,33 @@ class Storage:
         ).fetchone()
         return self._char_row(row) if row else None
 
+    def setting_terms(self) -> dict:
+        """设定词表：{词: (类型, 描述)}，供写作时命中提示（角色/地点/势力/世界观等）。"""
+        terms: dict[str, tuple[str, str]] = {}
+        try:
+            for ch in self.list_characters():
+                name = (ch.name or "").strip()
+                if name and name not in terms:
+                    desc = ch.role or "角色"
+                    if ch.personality:
+                        desc += f"｜{ch.personality[:24]}"
+                    terms[name] = ("角色", desc)
+            for wv in self.list_worldviews():
+                wname = (wv.name or "").strip()
+                if wname:
+                    terms[wname] = ("世界观", wv.genre or "设定")
+                for line in str(wv.places or "").splitlines():
+                    p = line.strip()
+                    if p and p not in terms:
+                        terms[p] = ("地点", wv.name or "世界观")
+                for line in str(wv.factions or "").splitlines():
+                    f = line.strip()
+                    if f and f not in terms:
+                        terms[f] = ("势力", wv.name or "世界观")
+        except Exception:  # noqa: BLE001
+            pass
+        return terms
+
     def add_character(self, c: Character) -> int:
         cur = self.conn.execute(
             "INSERT INTO characters (book_id, name, role, gender, age, appearance, personality, personality_tags, desire, fear, flaw, portrait_path, growth, growth_flow, faction, background, notes, worldview_id, custom_attrs, custom_binds)"

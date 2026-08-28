@@ -280,6 +280,13 @@ class SettingsDialog(GradientDialog):
         self.global_style_check = QCheckBox("注入写作风格（来自作者身份页「写作偏好」）")
         self.global_style_check.setChecked(bool(ai_cfg.get("global_style", False)))
         api_form.addRow("", self.global_style_check)
+        self.global_book_check = QCheckBox(
+            "注入全书设定（写作上下文：角色/世界观/大纲）——勾选即同意随 AI 请求发送")
+        self.global_book_check.setChecked(bool(ai_cfg.get("global_book_context", False)))
+        self.global_book_check.setToolTip(
+            "开启后所有 AI 操作（AI 面板对话/润色/续写/优化/按范本导出等）都会附带当前项目的"
+            "全书设定摘要；设定内容会随请求发送给 AI 服务。严格隐私模式下 AI 被禁用，不会发送。")
+        api_form.addRow("", self.global_book_check)
         self.memory_check = QCheckBox("AI 面板对话记忆（多轮上下文，发送时携带历史）")
         self.memory_check.setChecked(bool(ai_cfg.get("memory_enabled", True)))
         api_form.addRow("", self.memory_check)
@@ -767,6 +774,7 @@ class SettingsDialog(GradientDialog):
             "global_identity": self.global_identity_check.isChecked(),
             "global_works": self.global_works_check.isChecked(),
             "global_style": self.global_style_check.isChecked(),
+            "global_book_context": self.global_book_check.isChecked(),
             "memory_enabled": self.memory_check.isChecked(),
         })
 

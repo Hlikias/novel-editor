@@ -993,6 +993,13 @@ class EditorWidget(QTextEdit):
         cursor = self.textCursor()
         return f"行 {cursor.blockNumber() + 1}, 列 {cursor.columnNumber() + 1}"
 
+    def current_line_text(self) -> str:
+        """当前光标所在行的纯文本（写作时设定命中提示用）。"""
+        try:
+            return self.textCursor().block().text() or ""
+        except Exception:  # noqa: BLE001
+            return ""
+
     def apply_config(self, config: dict) -> None:
         """设置变化后刷新编辑器外观与行为。
 

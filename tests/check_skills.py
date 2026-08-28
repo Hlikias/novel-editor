@@ -218,7 +218,59 @@ msgs = captured["data"]["messages"]
 check("messages 含 system+历史+user", msgs[0]["role"] == "system"
       and msgs[1]["content"] == "h1" and msgs[2]["content"] == "a1" and msgs[3]["content"] == "新问题")
 
-# ---------- 4) 帮助菜单免责声明 ----------
+# ---------- 4) 全书设定注入 + 写作设定提示 ----------
+from app.models import Book, Chapter, Character, Worldview
+from app.storage import Storage
+from app.chapter_snap import chapter_snap_data
+sd = tempfile.mkdtemp()
+sb = Book(title="设定书", genre="玄幻", book_type="长篇小说")
+st = Storage.create_project(sb, sd)
+ch1 = Character(book_id=sb.id, name="林晚", role="主角", personality="冷静坚韧")
+ch1.id = st.add_character(ch1)
+wv = Worldview(book_id=sb.id, name="九州", genre="玄幻", places="青云山\n魔渊", factions="正道盟")
+wv.id = st.add_worldview(wv)
+terms = st.setting_terms()
+check("设定词表含角色", "林晚" in terms and terms["林晚"][0] == "角色")
+check("设定词表含地点", "青云山" in terms and terms["青云山"][0] == "地点")
+check("设定词表含势力", "正道盟" in terms and terms["正道盟"][0] == "势力")
+
+# 速览：正文命中设定
+c1 = Chapter(book_id=sb.id, title="第一章", content="　　林晚在青云山上修炼，遇见正道盟弟子。")
+c1.id = st.add_chapter(c1)
+snap = chapter_snap_data(st, c1.id, "第一章")
+check("速览相关设定命中", any(h["word"] == "林晚" for h in snap["setting_hits"])
+      and any(h["word"] == "青云山" for h in snap["setting_hits"]))
+
+# 编辑器 tips：当前行命中设定
+win2 = MainWindow()
+win2._set_project(st)
+win2.open_chapter(c1.id)
+ed2 = win2.current_editor()
+ed2.set_content("　　林晚走向青云山。")
+ed2.moveCursor(ed2.textCursor().MoveOperation.End)
+tips = win2._line_setting_hits(ed2)
+check("编辑器 tips 命中角色+地点", "林晚" in tips and "青云山" in tips and "命中设定" in tips)
+ed2.set_content("　　窗外下着雨。")
+ed2.moveCursor(ed2.textCursor().MoveOperation.End)
+check("无命中时 tips 为空", win2._line_setting_hits(ed2) == "")
+
+# AI 注入全书设定
+cfg6 = {
+    "api": {"system_prompt": "默认", "base_url": "x", "api_key": "k", "model": "m"},
+    "ai": {"global_book_context": True, "global_skill": False, "global_identity": False,
+           "global_works": False, "global_style": False, "memory_enabled": True},
+    "skills": [], "identity": {}, "privacy": {"strict": False, "ai_enabled": True},
+}
+panel2 = AIPanel(cfg6)
+panel2.book_context_provider = lambda: "【设定】主角林晚，地点青云山。"
+sp = panel2._build_system_prompt()
+check("勾选全书设定→注入", "全书设定" in sp and "林晚" in sp and "青云山" in sp)
+cfg6["ai"]["global_book_context"] = False
+sp_none = panel2._build_system_prompt()
+check("未勾选→不注入设定", "全书设定" not in sp_none)
+win2.close()
+
+# ---------- 5) 帮助菜单免责声明 ----------
 win = MainWindow()
 flat = []
 for _name, menu in getattr(win, "_menus", []):
