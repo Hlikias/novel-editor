@@ -271,26 +271,35 @@ class AIPanel(QWidget):
         return data if isinstance(data, dict) else None
 
     def _build_system_prompt(self) -> str:
-        """组合系统提示：默认 system_prompt + 技能指令 + 作者身份。
+        """组合系统提示：默认 system_prompt + 勾选的全局 AI 参数。
 
-        技能/身份各自独立开关（config["ai"]["global_skill"] / ["global_identity"]，
-        默认开；兼容旧版单一开关 global_context）。开启时所有 AI 调用都注入。"""
+        全局参数在「设置 → API」配置：技能指令 / 身份 / 以往作品 / 写作风格，
+        各自 checkbox + lineedit，勾选且填了内容才注入（作用于所有 AI 请求）。
+        若未勾选"技能指令"但 AI 面板选中了技能，则注入该技能的指令（局部生效）。"""
         parts = [self.config.get("api", {}).get("system_prompt", "") or ""]
         ai_cfg = self.config.get("ai", {})
         old_ctx = ai_cfg.get("global_context", True)
         if ai_cfg.get("global_skill", old_ctx):
+            text = (ai_cfg.get("skill_text") or "").strip()
+            if text:
+                parts.append(text)
+        else:
+            # 局部技能：AI 面板下拉选中的技能指令（未开启全局技能参数时生效）
             skill = self._selected_skill()
             if skill and (skill.get("system_prompt") or "").strip():
                 parts.append(skill["system_prompt"].strip())
         if ai_cfg.get("global_identity", old_ctx):
-            ident = self.config.get("identity") or {}
-            if any(str(v).strip() for v in ident.values()):
-                labels = {"pen_name": "笔名", "bio": "简介", "preferences": "写作偏好",
-                          "contact": "联系方式", "works": "作品"}
-                bits = [f"{labels.get(k, k)}：{str(v).strip()}"
-                        for k, v in ident.items() if str(v).strip()]
-                if bits:
-                    parts.append("【作者身份（写作时参考）】" + "；".join(bits))
+            text = (ai_cfg.get("identity_text") or "").strip()
+            if text:
+                parts.append("【作者身份（写作时参考）】" + text)
+        if ai_cfg.get("global_works", False):
+            text = (ai_cfg.get("works_text") or "").strip()
+            if text:
+                parts.append("【作者以往作品】" + text)
+        if ai_cfg.get("global_style", False):
+            text = (ai_cfg.get("style_text") or "").strip()
+            if text:
+                parts.append("【写作风格（写作时遵循）】" + text)
         return "\n".join(p for p in parts if p.strip())
 
     # ---------- 行为 ----------

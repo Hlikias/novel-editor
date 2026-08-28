@@ -240,19 +240,47 @@ class SettingsDialog(GradientDialog):
         hint.setObjectName("mutedLabel")
         api_form.addRow("", hint)
 
-        # 全局 AI 参考（每个选项独立可开关）
+        # 全局 AI 参数：checkbox + lineedit，选中项作为参数注入所有 AI 请求
         ai_cfg = config.get("ai", {})
-        # 兼容旧版单一开关 global_context
+        # 兼容旧版单一开关 global_context / global_skill / global_identity
         old_ctx = ai_cfg.get("global_context", True)
-        self.global_skill_check = QCheckBox("注入当前技能指令（所有 AI 请求）")
-        self.global_skill_check.setChecked(bool(ai_cfg.get("global_skill", old_ctx)))
-        api_form.addRow("", self.global_skill_check)
-        self.global_identity_check = QCheckBox("注入作者身份（所有 AI 请求）")
-        self.global_identity_check.setChecked(bool(ai_cfg.get("global_identity", old_ctx)))
-        api_form.addRow("", self.global_identity_check)
+
+        def _param_row(form, key: str, label: str, default_checked: bool,
+                       ph: str) -> tuple[QCheckBox, QLineEdit]:
+            cb = QCheckBox(label)
+            cb.setChecked(bool(ai_cfg.get(key, default_checked)))
+            le = QLineEdit(ai_cfg.get(key + "_text", ""))
+            le.setPlaceholderText(ph)
+            row_w = QWidget()
+            rl = QHBoxLayout(row_w)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.addWidget(cb)
+            rl.addWidget(le, 1)
+            form.addRow("", row_w)
+            return cb, le
+
+        self.global_skill_check, self.skill_text_edit = _param_row(
+            api_form, "global_skill", "技能指令", old_ctx,
+            "如：你是一位散文家，写作注重意境与语言美感…")
+        self.global_identity_check, self.identity_text_edit = _param_row(
+            api_form, "global_identity", "身份", old_ctx,
+            "如：作者笔名 惊鸿，中文系在读，擅长叙事…")
+        self.global_works_check, self.works_text_edit = _param_row(
+            api_form, "global_works", "以往作品", False,
+            "如：《山居笔记》《夜雨录》（每部一句简介，可选）")
+        self.global_style_check, self.style_text_edit = _param_row(
+            api_form, "global_style", "写作风格", False,
+            "如：语言细腻、多用比喻，偏好第一人称与短句…")
         self.memory_check = QCheckBox("AI 面板对话记忆（多轮上下文，发送时携带历史）")
         self.memory_check.setChecked(bool(ai_cfg.get("memory_enabled", True)))
         api_form.addRow("", self.memory_check)
+        hint2 = QLabel(
+            "勾选的项会作为全局参数注入所有 AI 请求（AI 面板与各 AI 任务）。\n"
+            "技能/身份的更多管理在「🧠 技能」「🪪 作者身份」页。"
+        )
+        hint2.setWordWrap(True)
+        hint2.setObjectName("mutedLabel")
+        api_form.addRow("", hint2)
         self.tabs.addTab(api_tab, "🌐 API 设置")
 
         # ---------- 编辑器设置 ----------
@@ -698,10 +726,16 @@ class SettingsDialog(GradientDialog):
         privacy["ai_enabled"] = self.ai_net_check.isChecked()
         privacy["network_quotes"] = self.quote_net_check.isChecked()
 
-        # 全局 AI 参考（每个选项独立开关）
+        # 全局 AI 参数（checkbox+lineedit，选中项作为参数注入）
         self.config.setdefault("ai", {}).update({
             "global_skill": self.global_skill_check.isChecked(),
+            "skill_text": self.skill_text_edit.text().strip(),
             "global_identity": self.global_identity_check.isChecked(),
+            "identity_text": self.identity_text_edit.text().strip(),
+            "global_works": self.global_works_check.isChecked(),
+            "works_text": self.works_text_edit.text().strip(),
+            "global_style": self.global_style_check.isChecked(),
+            "style_text": self.style_text_edit.text().strip(),
             "memory_enabled": self.memory_check.isChecked(),
         })
 
