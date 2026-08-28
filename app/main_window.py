@@ -1550,6 +1550,26 @@ class MainWindow(QMainWindow):
                 )
         except Exception:  # noqa: BLE001
             pass
+        # 自定义模块条目（金手指/规则等用户自定义设定）→ AI 参考
+        try:
+            mod_lines = []
+            for md in self.storage.list_module_defs():
+                if not md.enabled:
+                    continue
+                entries = self.storage.list_module_entries(md.id)
+                if not entries:
+                    continue
+                rows = []
+                for e in entries[:4]:
+                    parts_attr = [f"{a[0]}:{str(a[1])[:30]}"
+                                  for a in (e.values or {}).items()]
+                    rows.append("，".join(parts_attr) if parts_attr else "（空条目）")
+                if rows:
+                    mod_lines.append(f"　【{md.name}】" + "；".join(rows))
+            if mod_lines:
+                parts.append("【自定义设定】\n" + "\n".join(mod_lines[:6]))
+        except Exception:  # noqa: BLE001
+            pass
         ctx = "\n".join(parts)
         return ctx[:max_chars]
 

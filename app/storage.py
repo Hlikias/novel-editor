@@ -598,6 +598,18 @@ class Storage:
                     f = line.strip()
                     if f and f not in terms:
                         terms[f] = ("势力", wv.name or "世界观")
+            # 自定义模块：模块名 + 条目名 + 属性值 作为命中词
+            for md in self.list_module_defs():
+                if not md.enabled:
+                    continue
+                mname = (md.name or "").strip()
+                if mname and mname not in terms:
+                    terms[mname] = ("自定义", "用户自定义模块")
+                for e in self.list_module_entries(md.id):
+                    for _k, v in (e.values or {}).items():
+                        sv = str(v or "").strip()
+                        if 2 <= len(sv) <= 12 and sv not in terms:
+                            terms[sv] = ("自定义", md.name or "自定义设定")
         except Exception:  # noqa: BLE001
             pass
         return terms

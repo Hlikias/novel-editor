@@ -106,6 +106,30 @@ for i in range(usage.tabs.widget(0).count()):
 check("利用率报告列出角色", any("林晚" in t for t in texts))
 check("利用率报告标出未使用", any("未使用" in t for t in texts))
 usage.close()
+# ---------- 4) 自定义模块：流行模板 + 进入 AI/写作参考 ----------
+from app.models import ModuleDef, ModuleEntry
+from app.dialogs.character_dialog import MODULE_TEMPLATES, ModuleDefsTab
+check("流行模板齐全", all(k in MODULE_TEMPLATES for k in
+      ("金手指系统", "师徒绑定系统", "百倍返还", "穿越设定", "沙雕吐槽规则", "群像角色表")))
+check("模板含属性字段", "修为反哺比例" in MODULE_TEMPLATES["师徒绑定系统"]["attributes"])
+
+# 用模板创建模块
+mdt = ModuleDefsTab(st3)
+mdt.template_combo.setCurrentIndex(mdt.template_combo.findData("金手指系统"))
+mdt._add()
+mds = [m for m in st3.list_module_defs()]
+check("模板一键创建模块", any(m.name == "金手指系统" and "金手指规则" in m.attributes for m in mds))
+
+# 添加条目 → 进入 AI 全书设定 与 命中词表
+md = [m for m in st3.list_module_defs() if m.name == "金手指系统"][0]
+me = ModuleEntry(book_id=st3.get_book().id, module_id=md.id,
+                 values={"金手指规则": "徒弟修为反哺师傅", "限制": "不可解绑"})
+me.id = st3.add_module_entry(me)
+ctx = win._book_context()
+check("自定义模块进入 AI 参考", "自定义设定" in ctx and "金手指系统" in ctx and "反哺" in ctx)
+t3 = st3.setting_terms()
+check("自定义词进入命中提示", "金手指系统" in t3 and t3["金手指系统"][0] == "自定义")
+
 win.close()
 st3.close()
 app.processEvents()

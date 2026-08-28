@@ -1412,6 +1412,35 @@ class ChapterStatusTab(QWidget):
 # ======================================================================
 # 📦 自定义模块页：定义新 tab + 开关武器/属性模块
 # ======================================================================
+# 流行设定模板（金手指/规则类脑洞），一键创建自定义模块
+MODULE_TEMPLATES: dict[str, dict] = {
+    "金手指系统": {
+        "name": "金手指系统",
+        "attributes": "系统名称\n绑定对象\n金手指规则\n触发条件\n限制/代价\n升级方式",
+    },
+    "师徒绑定系统": {
+        "name": "师徒绑定系统",
+        "attributes": "绑定规则\n修为反哺比例\n徒弟上限\n解绑条件\n隐藏机制",
+    },
+    "百倍返还": {
+        "name": "百倍返还",
+        "attributes": "返还对象\n返还倍数\n返还时间\n物品等级提升\n使用限制",
+    },
+    "穿越设定": {
+        "name": "穿越设定",
+        "attributes": "穿越方式\n原身身份\n金手指\n记忆/能力\n回归条件",
+    },
+    "沙雕吐槽规则": {
+        "name": "沙雕吐槽规则",
+        "attributes": "吐槽对象\n槽点类型\n吐槽奖励\n严肃时刻设定\n画风突变规则",
+    },
+    "群像角色表": {
+        "name": "群像角色表",
+        "attributes": "角色名\n定位\n性格\n与主角关系\n关键事件",
+    },
+}
+
+
 class ModuleDefsTab(QWidget):
     data_changed = Signal()
 
@@ -1430,10 +1459,16 @@ class ModuleDefsTab(QWidget):
         self.list_widget.currentItemChanged.connect(lambda cur, _p: self._on_select(cur))
         lv.addWidget(self.list_widget, 1)
         row = QHBoxLayout()
+        # 流行设定模板：一键创建自定义模块（金手指/规则类脑洞）
+        self.template_combo = QComboBox()
+        self.template_combo.addItem("（自定义模块）", None)
+        for _k, tpl in MODULE_TEMPLATES.items():
+            self.template_combo.addItem("✨ " + tpl["name"], _k)
         add_btn = QPushButton("➕ 新增")
         del_btn = QPushButton("🗑 删除")
         add_btn.clicked.connect(self._add)
         del_btn.clicked.connect(self._delete)
+        row.addWidget(self.template_combo, 1)
         row.addWidget(add_btn)
         row.addWidget(del_btn)
         lv.addLayout(row)
@@ -1542,6 +1577,16 @@ class ModuleDefsTab(QWidget):
         self.on_map_check.setChecked(False)
 
     def _add(self):
+        # 若选了流行模板：直接按模板创建模块（预填名称与属性），否则进入空白表单
+        tkey = self.template_combo.currentData()
+        if tkey and tkey in MODULE_TEMPLATES:
+            tpl = MODULE_TEMPLATES[tkey]
+            m = ModuleDef(book_id=self.storage.get_book().id,
+                          name=tpl["name"], attributes=tpl["attributes"], enabled=1)
+            m.id = self.storage.add_module_def(m)
+            self.reload(select_id=m.id)
+            self.data_changed.emit()
+            return
         self._clear_form()
         self.name_edit.setFocus()
 
