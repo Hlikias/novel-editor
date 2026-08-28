@@ -115,6 +115,10 @@ class DialogTitleBar(QWidget):
             self.dialog.showMaximized()
         self.update_max_icon()
 
+    def set_title(self, title: str):
+        """更新标题栏文字（体裁切换等场景）。"""
+        self.title_label.setText(title)
+
     def update_max_icon(self):
         self.max_btn.setText("❐" if self.dialog.isMaximized() else "□")
 

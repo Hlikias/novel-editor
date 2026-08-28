@@ -40,7 +40,7 @@ from .exporter import FORMATS, export, safe_filename
 from .find_dialog import FindReplaceDialog
 from .format_bar import FormatBar
 from .fulltext_dialog import FullTextReplaceDialog
-from .models import Book, Bookmark, Chapter, Note
+from .models import BOOK_TYPES, SERIAL_TYPE, Book, Bookmark, Chapter, Note
 from .outline_view import OutlineView
 from .panels import (
     BookmarksView, CheckView, NotesView, PomodoroView, SearchView,
@@ -462,7 +462,7 @@ class MainWindow(QMainWindow):
         create_menu = QMenu(self)
         self._add_action(create_menu, "＋ 新建项目…", self.new_project, "Ctrl+N", None)
         create_menu.addSeparator()
-        self._add_action(create_menu, "📄 新建章节", self.new_chapter, None, None)
+        self._new_chapter_action = self._add_action(create_menu, "📄 新建章节", self.new_chapter, None, None)
         self._add_action(create_menu, "🌍 新建世界观…", lambda: self.show_character_dialog(1), None, None)
         self._add_action(create_menu, "👤 新建角色…", lambda: self.show_character_dialog(2), None, None)
         self._add_action(create_menu, "⚔ 新建武器…", lambda: self.show_character_dialog(3), None, None)
@@ -472,9 +472,9 @@ class MainWindow(QMainWindow):
         self._add_action(create_menu, "✨ 记录灵感…", self.show_quick_note_dialog, "Ctrl+Shift+I", None)
         create_menu.addSeparator()
         self._add_action(create_menu, "🪝 新建伏笔", lambda: self._planning_new("foreshadow"), None, None)
-        self._add_action(create_menu, "📇 新建章节卡片", lambda: self._planning_new("card"), None, None)
+        self._card_action = self._add_action(create_menu, "📇 新建章节卡片", lambda: self._planning_new("card"), None, None)
         self._add_action(create_menu, "📈 新建剧情线", lambda: self._planning_new("storyline"), None, None)
-        self._add_action(create_menu, "✍️ AI 生成章节…", self._show_chapter_gen_dialog, None, None)
+        self._ai_gen_action = self._add_action(create_menu, "✍️ AI 生成章节…", self._show_chapter_gen_dialog, None, None)
         create_menu.addSeparator()
         self._add_action(create_menu, "🗺 新建地图", lambda: self._show_character_tab("map"), None, None)
         self._add_action(create_menu, "🧩 新建自定义模块", lambda: self._show_character_tab("modules"), None, None)
@@ -505,7 +505,7 @@ class MainWindow(QMainWindow):
         project_menu = QMenu(self)
         self._add_action(project_menu, "ℹ 项目信息…", self.show_project_info_dialog, None, None)
         project_menu.addSeparator()
-        self._add_action(project_menu, "🗂 章节管理…", self.show_chapter_dialog, "Ctrl+Shift+C", None)
+        self._chapter_mgr_action = self._add_action(project_menu, "🗂 章节管理…", self.show_chapter_dialog, "Ctrl+Shift+C", None)
         self._add_action(project_menu, "📛 取名器…", self._show_name_dialog, None, None)
         self._add_action(project_menu, "🗑 回收站…", self._show_recycle_dialog, None, None)
         self._add_action(project_menu, "👥 大纲 / 世界观 / 角色管理…", lambda: self.show_character_dialog(2), "Ctrl+Shift+R", None)
@@ -1101,6 +1101,9 @@ class MainWindow(QMainWindow):
 
     # ---------- AI 生成章节 ----------
     def _show_chapter_gen_dialog(self):
+        serial = self._is_serial()
+        title = "📖 AI 生成章节" if serial else "📝 AI 生成文章"
+        unit = "章" if serial else "篇"
         if not hasattr(self, "_chapter_gen_dialog") or self._chapter_gen_dialog is None:
             from .dialogs.chapter_gen_dialog import ChapterGenDialog
             self._chapter_gen_dialog = ChapterGenDialog(
@@ -1108,7 +1111,11 @@ class MainWindow(QMainWindow):
                 on_generate=self._gen_chapter_call,
                 on_ideas=self._gen_chapter_ideas_call,
                 on_save=self._save_gen_chapter_call,
+                title=title,
+                unit_word=unit,
             )
+        else:
+            self._chapter_gen_dialog.update_terms(unit, title)
         dlg = self._chapter_gen_dialog
         dlg.show()
         dlg.raise_()
@@ -1146,47 +1153,80 @@ class MainWindow(QMainWindow):
             except Exception:  # noqa: BLE001
                 pass
         tail = body.strip()[-max_chars:]
-        return f"《{prev.title}》（上一章结尾）：\n{tail}"
+        unit = "章" if self._is_serial() else "篇"
+        return f"《{prev.title}》（上一篇结尾）：\n{tail}" if unit == "篇" else f"《{prev.title}》（上一章结尾）：\n{tail}"
 
-    @staticmethod
-    def _gen_chapter_prompt(req: dict, prev_tail: str, book_title: str,
+    def _gen_chapter_prompt(self, req: dict, prev_tail: str, book_title: str,
                             context: str = "") -> str:
-        parts = [f"你是一位资深中文网络小说作家。请为小说《{book_title}》创作一章完整的章节正文。"]
+        """生成正文 prompt：长篇小说=章节正文；非长篇=独立文章（散文/短篇/作文/论文等）。"""
+        if self._is_serial():
+            parts = [f"你是一位资深中文网络小说作家。请为小说《{book_title}》创作一章完整的章节正文。"]
+        else:
+            btype = self._book_type_name()
+            parts = [f"你是一位资深中文写作者。请为《{book_title}》撰写一篇完整的{btype}正文。"]
         if context:
             parts.append("【全书设定（参考）】角色/世界观/大纲如下，人物名与设定须与之一致：\n" + context)
         if prev_tail:
-            parts.append("【上一章回顾】须承接以下内容与文风，保持视角与人物称谓一致：\n" + prev_tail)
+            prev_label = "【上一章回顾】" if self._is_serial() else "【上一篇回顾】"
+            parts.append(prev_label + "须承接以下内容与文风，保持视角与人物称谓一致：\n" + prev_tail)
         if req.get("summary"):
-            parts.append("【本章简述】\n" + req["summary"])
+            parts.append("【内容简述】\n" + req["summary"])
         parts.append(f"【目标字数】约 {int(req.get('words', 2000))} 字")
         if req.get("extra"):
             parts.append("【附加要求】\n" + req["extra"])
-        parts.append(
-            "【输出要求】\n"
-            "1. 只输出章节正文，不要标题、不要“第X章”字样、不要任何解释性文字；\n"
-            "2. 人物姓名必须与【全书设定】中的角色名完全一致，不要改名、不要加字少字；\n"
-            "3. 自然分段，节奏符合网络小说阅读习惯；\n"
-            "4. 结尾留一个推进感或悬念钩子，便于继续写下一章。"
-        )
+        if self._is_serial():
+            parts.append(
+                "【输出要求】\n"
+                "1. 只输出章节正文，不要标题、不要“第X章”字样、不要任何解释性文字；\n"
+                "2. 人物姓名必须与【全书设定】中的角色名完全一致，不要改名、不要加字少字；\n"
+                "3. 自然分段，节奏符合网络小说阅读习惯；\n"
+                "4. 结尾留一个推进感或悬念钩子，便于继续写下一章。"
+            )
+        else:
+            parts.append(
+                "【输出要求】\n"
+                "1. 只输出文章正文，不要标题、不要任何解释性文字；\n"
+                "2. 语言自然流畅，符合该体裁的文体特征；\n"
+                "3. 自然分段；若为散文/评论请注重情感与语言质感，若为作文/论文请注重结构与论证。"
+            )
         return "\n\n".join(parts)
 
-    @staticmethod
-    def _gen_ideas_prompt(req: dict, prev_tail: str, book_title: str,
+    def _gen_ideas_prompt(self, req: dict, prev_tail: str, book_title: str,
                           context: str = "") -> str:
-        parts = [f"你是一位资深中文网络小说作家，正在为《{book_title}》规划下一章。"]
+        """生成思路 prompt：长篇=下一章走向；非长篇=下一篇构思。"""
+        if self._is_serial():
+            parts = [f"你是一位资深中文网络小说作家，正在为《{book_title}》规划下一章。"]
+        else:
+            parts = [f"你是一位资深中文写作者，正在为《{book_title}》构思下一篇（{self._book_type_name()}）内容。"]
         if context:
             parts.append("【全书设定（参考）】人物名与设定须与之一致：\n" + context)
         if prev_tail:
-            parts.append("【上一章结尾】\n" + prev_tail)
+            prev_label = "【上一章结尾】" if self._is_serial() else "【上一篇结尾】"
+            parts.append(prev_label + "\n" + prev_tail)
         if req.get("summary"):
-            parts.append("【本章简述】\n" + req["summary"])
+            parts.append("【内容简述】\n" + req["summary"])
         if req.get("extra"):
             parts.append("【附加要求】\n" + req["extra"])
-        parts.append(
-            "请推荐 2~3 个本章剧情走向思路：每个思路先用一句话概括，再用 2~3 句说明"
-            "如何展开、与上一章结尾如何衔接、能埋下什么伏笔。只输出思路，不要输出章节正文。"
-        )
+        if self._is_serial():
+            parts.append(
+                "请推荐 2~3 个本章剧情走向思路：每个思路先用一句话概括，再用 2~3 句说明"
+                "如何展开、与上一章结尾如何衔接、能埋下什么伏笔。只输出思路，不要输出章节正文。"
+            )
+        else:
+            parts.append(
+                "请推荐 2~3 个写作构思：每个构思先用一句话概括主题，再用 2~3 句说明"
+                "如何展开（结构/素材/情感或论点），以及与前一篇内容的联系。只输出构思，不要输出正文。"
+            )
         return "\n\n".join(parts)
+
+    def _book_type_name(self) -> str:
+        """当前作品体裁的中文名（短篇小说/散文随笔…）。"""
+        try:
+            if self.storage is not None:
+                return self.storage.get_book().book_type or "文章"
+        except Exception:  # noqa: BLE001
+            pass
+        return "文章"
 
     def _book_title(self) -> str:
         try:
@@ -1254,7 +1294,7 @@ class MainWindow(QMainWindow):
         prev_tail = self._prev_chapter_tail() if req.get("use_prev") else ""
         context = self._book_context()
         prompt = self._gen_chapter_prompt(req, prev_tail, self._book_title(), context)
-        self.log(f"AI 生成章节中…（约 {req.get('words')} 字，已带入全书设定，请稍候）", "info")
+        self.log(f"AI 生成{'章节' if self._is_serial() else '文章'}中…（约 {req.get('words')} 字，已带入全书设定，请稍候）", "info")
 
         def wrapped(text, err):
             if not err and text:
@@ -1274,7 +1314,7 @@ class MainWindow(QMainWindow):
         prev_tail = self._prev_chapter_tail() if req.get("use_prev") else ""
         prompt = self._gen_ideas_prompt(req, prev_tail, self._book_title(),
                                         self._book_context())
-        self.log("AI 推荐章节思路中…", "info")
+        self.log(f"AI 推荐{'章节' if self._is_serial() else '文章'}思路中…", "info")
         self.ai_panel.run_task(prompt, done_cb, stream=False)
 
     def _save_gen_chapter_call(self, text: str, mode: str, done_cb):
@@ -1307,12 +1347,12 @@ class MainWindow(QMainWindow):
             done_cb(str(e))
 
     def _save_gen_as_new(self, text: str):
-        """把生成内容另存为新章节并打开。"""
+        """把生成内容另存为新章节/文章并打开。"""
         if self.storage is None:
             raise RuntimeError("请先新建或打开一个项目")
         ch = Chapter(
             book_id=self.storage.get_book().id,
-            title=f"第 {self.storage.max_chapter_order() + 1} 章",
+            title=self._new_item_title(),
             order=self.storage.max_chapter_order() + 1,
             status="草稿",
         )
@@ -1322,7 +1362,7 @@ class MainWindow(QMainWindow):
         if editor is not None:
             editor.set_content(text)
             self._save_editor(editor)
-        self.log("AI 生成章节已另存为新章节", "ok")
+        self.log(f"AI 生成{'章节' if self._is_serial() else '文章'}已另存为新{'章节' if self._is_serial() else '文章'}", "ok")
 
     def _open_bookmark(self, chapter_id: int, line: int):
         self.open_chapter(chapter_id)
@@ -1361,9 +1401,9 @@ class MainWindow(QMainWindow):
         self.chapter_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.chapter_tree.customContextMenuRequested.connect(self._chapter_dock_menu)
         layout.addWidget(self.chapter_tree, stretch=1)
-        new_btn = QPushButton("➕ 新建章节")
-        new_btn.clicked.connect(self.new_chapter)
-        layout.addWidget(new_btn)
+        self.new_chapter_btn = QPushButton("➕ 新建章节")
+        self.new_chapter_btn.clicked.connect(self.new_chapter)
+        layout.addWidget(self.new_chapter_btn)
         self.chapter_dock.setWidget(dock_widget)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.chapter_dock)
 
@@ -1635,12 +1675,13 @@ class MainWindow(QMainWindow):
             "QToolBar::separator{background:rgba(128,128,128,90);width:1px;margin:4px 3px;}"
         )
 
-        def add(text: str, slot, emoji: str) -> None:
+        def add(text: str, slot, emoji: str):
             a = QAction(text, self)
             a.setIcon(self._emoji_icon(emoji))
             a.setToolTip(text)
             a.triggered.connect(slot)
             tb.addAction(a)
+            return a
 
         def sep():
             tb.addSeparator()
@@ -1652,7 +1693,7 @@ class MainWindow(QMainWindow):
         add("📐 创作规划…", lambda: self._show_planning_dialog(True), "📐")
         sep()
         # ── AI 写作 ──
-        add("📖 AI 生成章节…", self._show_chapter_gen_dialog, "📖")
+        self._tb_ai_gen_action = add("📖 AI 生成章节…", self._show_chapter_gen_dialog, "📖")
         add("⌨ AI 写作输入…", self.show_ai_input_dialog, "⌨")
         add("✍️ 提炼本章要点", lambda: self._author_tool("refine"), "✍️")
         add("📖 前情提要…", lambda: self._author_tool("summary"), "🧭")
@@ -1988,6 +2029,7 @@ class MainWindow(QMainWindow):
         self.outline_view.set_storage(storage)
         self.overview_view.set_storage(storage)
         self._refresh_chapter_dock()
+        self._sync_unit_terms()
         # 切换到写作编辑界面（欢迎页消失）
         self.central_stack.setCurrentIndex(1)
         self.welcome_page.set_save_enabled(True)
@@ -2000,6 +2042,7 @@ class MainWindow(QMainWindow):
         self.storage.close()
         self.storage = None
         self.chapter_tree.clear()
+        self._sync_unit_terms()
         self.setWindowTitle("小说编辑器")
         self.book_label.setText("未打开项目")
         self.console.namespace["storage"] = None
@@ -2022,20 +2065,65 @@ class MainWindow(QMainWindow):
         self.log("项目已关闭")
 
     # ================= 章节 =================
+    def _is_serial(self) -> bool:
+        """当前项目是否为长篇小说（章节制）。非长篇=短篇/散文/作文/论文等篇制。"""
+        try:
+            if self.storage is not None:
+                return self.storage.get_book().book_type == SERIAL_TYPE
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+
+    def _unit(self, plural: bool = False) -> str:
+        """章节制返回「章」，篇制返回「篇」（plural=True 时 章节/文章）。"""
+        if self._is_serial():
+            return "章" if not plural else "章节"
+        return "篇" if not plural else "文章"
+
+    def _new_item_title(self) -> str:
+        """新建默认标题：长篇「第 N 章」，非长篇「未命名文章 N」。"""
+        n = self.storage.max_chapter_order() + 1
+        if self._is_serial():
+            return f"第 {n} 章"
+        return f"未命名文章 {n}"
+
+    def _sync_unit_terms(self):
+        """按体裁同步界面术语：长篇=章节，非长篇=文章/篇。"""
+        serial = self._is_serial()
+        if hasattr(self, "chapter_dock"):
+            self.chapter_dock.setWindowTitle("章节" if serial else "文章")
+        if hasattr(self, "new_chapter_btn"):
+            self.new_chapter_btn.setText("➕ 新建章节" if serial else "➕ 新建文章")
+        if getattr(self, "_new_chapter_action", None):
+            self._new_chapter_action.setText("📄 新建章节" if serial else "📄 新建文章")
+        if getattr(self, "_card_action", None):
+            self._card_action.setText("📇 新建章节卡片" if serial else "📇 新建文章卡片")
+        if getattr(self, "_ai_gen_action", None):
+            self._ai_gen_action.setText("✍️ AI 生成章节…" if serial else "✍️ AI 生成文章…")
+        if getattr(self, "_chapter_mgr_action", None):
+            self._chapter_mgr_action.setText("🗂 章节管理…" if serial else "🗂 文章管理…")
+        if getattr(self, "_tb_ai_gen_action", None):
+            text = "📖 AI 生成章节…" if serial else "📝 AI 生成文章…"
+            self._tb_ai_gen_action.setText(text)
+            self._tb_ai_gen_action.setToolTip(text)
+        if hasattr(self, "chapter_list_view"):
+            self.chapter_list_view.set_title("章节速查" if serial else "文章速查")
+        self._update_status()
+
     def new_chapter(self):
         if self.storage is None:
             QMessageBox.information(self, "提示", "请先新建或打开一个项目。")
             return
         ch = Chapter(
             book_id=self.storage.get_book().id,
-            title=f"第 {self.storage.max_chapter_order() + 1} 章",
+            title=self._new_item_title(),
             order=self.storage.max_chapter_order() + 1,
             status="草稿",
         )
         ch.id = self.storage.add_chapter(ch)
         self._refresh_chapter_dock()
         self.open_chapter(ch.id)
-        self.log(f"已新建章节《{ch.title}》", "ok")
+        self.log(f"已新建{'章节' if self._is_serial() else '文章'}《{ch.title}》", "ok")
 
     def _refresh_chapter_dock(self):
         self._updating_tree = True
@@ -2111,27 +2199,30 @@ class MainWindow(QMainWindow):
     def _chapter_dock_menu(self, pos):
         item = self.chapter_tree.itemAt(pos)
         menu = QMenu(self)
+        unit_zh = self._unit(True)   # 章节 / 文章
+        unit = self._unit()          # 章 / 篇
         ch_id = item.data(0, Qt.ItemDataRole.UserRole) if item else None
         if isinstance(ch_id, int):
             menu.addAction("📖 打开", lambda: self.open_chapter(ch_id))
             menu.addAction("✏ 重命名", lambda: self.chapter_tree.editItem(item, 0))
-            menu.addAction("📋 复制章节", lambda: self._duplicate_chapter(ch_id))
+            menu.addAction(f"📋 复制{unit_zh}", lambda: self._duplicate_chapter(ch_id))
             status_menu = menu.addMenu("📌 设为状态")
             for s in ("待写", "草稿", "修改", "定稿", "已完成", "弃稿"):
                 status_menu.addAction(s, lambda _=False, st=s: self._set_chapter_status(ch_id, st))
-            vol_menu = menu.addMenu("📚 移动到卷")
-            vols = sorted({c.volume for c in self.storage.list_chapters() if c.volume}) if self.storage else []
-            vol_menu.addAction("（未分卷）", lambda: self._set_chapter_volume(ch_id, ""))
-            for v in vols:
-                vol_menu.addAction(v, lambda _=False, vv=v: self._set_chapter_volume(ch_id, vv))
+            if self._is_serial():
+                vol_menu = menu.addMenu("📚 移动到卷")
+                vols = sorted({c.volume for c in self.storage.list_chapters() if c.volume}) if self.storage else []
+                vol_menu.addAction("（未分卷）", lambda: self._set_chapter_volume(ch_id, ""))
+                for v in vols:
+                    vol_menu.addAction(v, lambda _=False, vv=v: self._set_chapter_volume(ch_id, vv))
             menu.addSeparator()
-            menu.addAction("🔖 添加书签（本章开头）", lambda: self._add_chapter_bookmark(ch_id))
+            menu.addAction(f"🔖 添加书签（本{unit}开头）", lambda: self._add_chapter_bookmark(ch_id))
             menu.addAction("🔖 添加书签（指定行…）", lambda: self._add_chapter_bookmark_line(ch_id))
-            menu.addAction("📤 导出章节…", lambda: self._export_chapter_from_dock(ch_id))
-            menu.addAction("🗑 删除章节", lambda: self._delete_chapter_from_dock(ch_id))
+            menu.addAction(f"📤 导出{unit_zh}…", lambda: self._export_chapter_from_dock(ch_id))
+            menu.addAction(f"🗑 删除{unit_zh}", lambda: self._delete_chapter_from_dock(ch_id))
             menu.addSeparator()
-        menu.addAction("➕ 新建章节", self.new_chapter)
-        menu.addAction("章节管理…", self.show_chapter_dialog)
+        menu.addAction(f"➕ 新建{unit_zh}", self.new_chapter)
+        menu.addAction(f"{unit_zh}管理…", self.show_chapter_dialog)
         menu.addAction("刷新列表", self._refresh_chapter_dock)
         menu.exec(self.chapter_tree.mapToGlobal(pos))
 
@@ -2679,7 +2770,8 @@ class MainWindow(QMainWindow):
         if self.storage is None:
             QMessageBox.information(self, "提示", "请先新建或打开一个项目。")
             return
-        dlg = ChapterDialog(self.storage, self)
+        dlg = ChapterDialog(self.storage, self,
+                            title="章节管理" if self._is_serial() else "文章管理")
         dlg.chaptersChanged.connect(self._refresh_chapter_dock)
         dlg.openRequested.connect(self.open_chapter)
         dlg.exec()
@@ -3164,6 +3256,8 @@ class MainWindow(QMainWindow):
         today_words = self.time_tracker.stats().get("today", 0)
         goal = int(self.config.get("app", {}).get("daily_goal", 1000) or 1000)
         self.today_label.setText(f"✍️ 今日 {today_words}/{goal} 字")
+        unit = self._unit()          # 章 / 篇
+        unit_zh = self._unit(True)   # 章节 / 文章
         editor = self.current_editor()
         if editor is not None:
             self.pos_label.setText(editor.current_position_text())
@@ -3171,14 +3265,14 @@ class MainWindow(QMainWindow):
             lines = editor.document().blockCount()
             cid = getattr(editor, "chapter_id", None)
             self.words_label.setText(
-                f"本章 {stats['total']} 字（中文 {stats['cjk']} / 英文 {stats['en']}）"
+                f"本{unit} {stats['total']} 字（中文 {stats['cjk']} / 英文 {stats['en']}）"
             )
             self.para_label.setText(f"段落 {stats['paragraphs']} · 行 {lines}")
             if self.storage is not None:
                 saved_others = self.storage.total_words(exclude_id=cid)
                 self.total_label.setText(
                     f"全书 {saved_others + stats['total']} 字 · "
-                    f"{self.storage.count_chapters()} 章"
+                    f"{self.storage.count_chapters()} {unit}"
                 )
             else:
                 self.total_label.setText(f"全书 {stats['total']} 字")
@@ -3188,15 +3282,15 @@ class MainWindow(QMainWindow):
             ch_title = ""
             if cid is not None and self.storage is not None:
                 ch = self.storage.get_chapter(cid)
-                ch_title = ch.title if ch else "已删除章节"
-            self.editor_chapter_label.setText(f"📖 {ch_title or '未打开章节'}")
-            self.editor_this_label.setText(f"本章 {stats['total']} 字")
+                ch_title = ch.title if ch else f"已删除{unit_zh}"
+            self.editor_chapter_label.setText(f"📖 {ch_title or f'未打开{unit_zh}'}")
+            self.editor_this_label.setText(f"本{unit} {stats['total']} 字")
             self.editor_para_label.setText(f"段落 {stats['paragraphs']} · 行 {lines}")
             if self.storage is not None:
                 saved_others = self.storage.total_words(exclude_id=cid)
                 self.editor_total_label.setText(
                     f"📚 全书 {saved_others + stats['total']} 字 · "
-                    f"{self.storage.count_chapters()} 章"
+                    f"{self.storage.count_chapters()} {unit}"
                 )
             else:
                 self.editor_total_label.setText(f"📚 全书 {stats['total']} 字")
@@ -3205,20 +3299,20 @@ class MainWindow(QMainWindow):
             self.editor_mod_label.setText("● 未保存" if editor.document().isModified() else "✓ 已保存")
         else:
             self.pos_label.setText("行 1, 列 1")
-            self.words_label.setText("本章 0 字")
+            self.words_label.setText(f"本{unit} 0 字")
             self.para_label.setText("段落 0 · 行 0")
             if self.storage is not None:
                 self.total_label.setText(
                     f"全书 {self.storage.total_words()} 字 · "
-                    f"{self.storage.count_chapters()} 章"
+                    f"{self.storage.count_chapters()} {unit}"
                 )
             else:
-                self.total_label.setText("全书 0 字 · 0 章")
+                self.total_label.setText(f"全书 0 字 · 0 {unit}")
             self.enc_label.setText(self.config.get("editor", {}).get("encoding", "UTF-8"))
             self.mod_label.setText("")
             # ---- 编辑器底部信息条（无打开章节） ----
-            self.editor_chapter_label.setText("📖 未打开章节")
-            self.editor_this_label.setText("本章 0 字")
+            self.editor_chapter_label.setText(f"📖 未打开{unit_zh}")
+            self.editor_this_label.setText(f"本{unit} 0 字")
             self.editor_para_label.setText("段落 0 · 行 0")
             if self.storage is not None:
                 self.editor_total_label.setText(

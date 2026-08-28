@@ -25,8 +25,8 @@ class ChapterDialog(GradientDialog):
     chaptersChanged = Signal()          # 数据变化后通知主窗口刷新
     openRequested = Signal(int)         # 请求在编辑器中打开某章节
 
-    def __init__(self, storage, parent=None):
-        super().__init__("章节管理", parent, resizable=True)
+    def __init__(self, storage, parent=None, title: str = "章节管理"):
+        super().__init__(title, parent, resizable=True)
         self.storage = storage
         # 已记忆过窗口尺寸时跳过默认尺寸（_restore_geometry 已在 super().__init__ 中恢复）
         geo = _load_geoms().get(self.__class__.__name__)

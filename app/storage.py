@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS books (
     title TEXT NOT NULL,
     author TEXT DEFAULT '',
     genre TEXT DEFAULT '',
+    book_type TEXT DEFAULT '长篇小说',
     description TEXT DEFAULT '',
     storage_path TEXT DEFAULT '',
     created_at TEXT DEFAULT '',
@@ -354,6 +355,8 @@ class Storage:
             self.conn.execute("ALTER TABLE books ADD COLUMN tagline TEXT DEFAULT ''")
         if "book_status" not in book_cols:
             self.conn.execute("ALTER TABLE books ADD COLUMN book_status TEXT DEFAULT '连载'")
+        if "book_type" not in book_cols:
+            self.conn.execute("ALTER TABLE books ADD COLUMN book_type TEXT DEFAULT '长篇小说'")
         self.conn.commit()
 
     # ---------- 生命周期 ----------
@@ -399,8 +402,8 @@ class Storage:
     def save_book(self, book: Book) -> int:
         if book.id:
             self.conn.execute(
-                "UPDATE books SET title=?, author=?, genre=?, description=?, tagline=?, book_status=?, storage_path=?, settings=?, updated_at=? WHERE id=?",
-                (book.title, book.author, book.genre, book.description,
+                "UPDATE books SET title=?, author=?, genre=?, book_type=?, description=?, tagline=?, book_status=?, storage_path=?, settings=?, updated_at=? WHERE id=?",
+                (book.title, book.author, book.genre, book.book_type, book.description,
                  book.tagline, book.book_status, book.storage_path,
                  json.dumps(book.settings or {}, ensure_ascii=False),
                  book.updated_at, book.id),
@@ -408,9 +411,9 @@ class Storage:
             self.conn.commit()
             return book.id
         cur = self.conn.execute(
-            "INSERT INTO books (title, author, genre, description, tagline, book_status, storage_path, settings, created_at, updated_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (book.title, book.author, book.genre, book.description,
+            "INSERT INTO books (title, author, genre, book_type, description, tagline, book_status, storage_path, settings, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (book.title, book.author, book.genre, book.book_type, book.description,
              book.tagline, book.book_status, book.storage_path,
              json.dumps(book.settings or {}, ensure_ascii=False),
              book.created_at, book.updated_at),

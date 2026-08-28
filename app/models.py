@@ -11,13 +11,19 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+# 作品体裁：长篇小说=章节制；其余=篇/文章制
+BOOK_TYPES = ["长篇小说", "短篇小说", "散文随笔", "杂文评论", "作文论文", "学术文章", "其他文章"]
+SERIAL_TYPE = "长篇小说"
+
+
 @dataclass
 class Book:
     """一本书 = 一个项目。"""
     id: int = 0
     title: str = "未命名作品"      # 书名
     author: str = ""               # 作者
-    genre: str = "玄幻"            # 类型/题材
+    genre: str = "玄幻"            # 类型/题材（玄幻/都市/散文…）
+    book_type: str = SERIAL_TYPE   # 作品体裁：长篇小说（章节制）/短篇/散文/作文/论文…
     description: str = ""          # 简介
     tagline: str = ""              # 一句话创意
     book_status: str = "连载"      # 状态：连载 / 完结

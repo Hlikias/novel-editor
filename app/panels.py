@@ -96,7 +96,13 @@ class StatsView(QWidget):
             return
         chapters = self.storage.list_chapters()
         total = sum(c.word_count for c in chapters)
-        self.summary.setText(f"📚 {book.title}\n章节 {len(chapters)} ｜ 总字数 {total}")
+        try:
+            serial = self.storage.get_book().book_type == "长篇小说"
+        except Exception:  # noqa: BLE001
+            serial = True
+        unit_zh = "章节" if serial else "文章"
+        self.summary.setText(f"📚 {book.title}\n{unit_zh} {len(chapters)} ｜ 总字数 {total}")
+        self.tree.setHeaderLabels([unit_zh, "字数", "状态"])
         self.tree.clear()
         for ch in chapters:
             self.tree.addTopLevelItem(
@@ -108,13 +114,21 @@ class StatsView(QWidget):
             self.empty_actions.setEnabled(False)
         else:
             self.tree.hide()
-            self._show_empty(
-                "📝 还没有章节。\n\n"
-                "· 点击左侧「➕ 新建章节」开始写作\n"
-                "· 或 Ctrl+Shift+C 打开章节管理批量建章\n"
-                "· 写下的每一章都会自动统计字数",
-                False,
-            )
+            if serial:
+                hint = (
+                    "📝 还没有章节。\n\n"
+                    "· 点击左侧「➕ 新建章节」开始写作\n"
+                    "· 或 Ctrl+Shift+C 打开章节管理批量建章\n"
+                    "· 写下的每一章都会自动统计字数"
+                )
+            else:
+                hint = (
+                    "📝 还没有文章。\n\n"
+                    "· 点击左侧「➕ 新建文章」开始写作\n"
+                    "· 或 Ctrl+Shift+C 打开文章管理批量建篇\n"
+                    "· 写下的每一篇都会自动统计字数"
+                )
+            self._show_empty(hint, False)
 
 
 class SearchView(QWidget):
