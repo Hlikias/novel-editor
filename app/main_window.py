@@ -361,6 +361,21 @@ class ChapterTree(QTreeWidget):
 # ======================================================================
 # 主窗口
 # ======================================================================
+def _plan_chapter_hint(length_label: str) -> str:
+    """按目标篇幅给出建议章节规模（每章约 2~4 千字）。"""
+    import re
+    m = re.search(r"约\s*(\d+)\s*(千|万)字", length_label or "")
+    if not m:
+        return "6~12 个章节节点"
+    n = int(m.group(1))
+    words = n * 1000 if m.group(2) == "千" else n * 10000
+    if words <= 10000:
+        return "3~6 个章节节点（短篇可少分章）"
+    low = max(4, int(words / 4000))
+    high = max(low + 4, int(words / 2000))
+    return f"约 {low}~{high} 个章节节点（按目标篇幅，每章约 2~4 千字）"
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1195,16 +1210,25 @@ class MainWindow(QMainWindow):
 
     # ---------- AI 一键前期策划 ----------
     @staticmethod
-    def _review_prompt(data: dict) -> str:
+    def _review_prompt(data: dict, length_hint: str = "") -> str:
         """审查官 prompt：检查设定合理性，输出问题清单 JSON。"""
         import json as _j
+        scale_check = ""
+        if length_hint:
+            scale_check = (
+                "【篇幅-规模匹配】目标篇幅为：" + length_hint
+                + "（每章约 2~4 千字）。请核对 outline 章节节点数是否与目标篇幅匹配："
+                + _plan_chapter_hint(length_hint)
+                + "；节点过少或过多都要列为问题。\n"
+            )
         return (
             "你是一位严格的小说设定审查官。请审查以下 AI 生成的小说前期设定，"
             "找出其中的问题：逻辑矛盾、设定冲突、完整性缺失（如角色没融入世界观）、"
             "伏笔无法回收、规则不自洽（如金手指规则违背自身设定）、人物动机不成立等。\n"
-            "【设定内容】\n" + _j.dumps(data, ensure_ascii=False, indent=1) + "\n"
+            + scale_check
+            + "【设定内容】\n" + _j.dumps(data, ensure_ascii=False, indent=1) + "\n"
             "【输出要求】只输出一个 JSON 对象（不要代码块标记、不要解释文字）：\n"
-            '{"issues": [{"type": "逻辑矛盾/设定冲突/完整性/伏笔连贯/规则自洽/人物动机", "desc": "具体问题说明"}]}\n'
+            '{"issues": [{"type": "逻辑矛盾/设定冲突/完整性/伏笔连贯/规则自洽/人物动机/篇幅规模", "desc": "具体问题说明"}]}\n'
             "若没有问题，输出 {\"issues\": []}。"
         )
 
@@ -1242,6 +1266,22 @@ class MainWindow(QMainWindow):
         self._ai_preplan_dialog.activateWindow()
 
     @staticmethod
+    def _plan_chapter_hint(length_label: str) -> str:
+        """按目标篇幅给出建议章节规模（每章约 2~4 千字）。"""
+        import re
+        m = re.search(r"约\s*(\d+)\s*(千|万)字", length_label or "")
+        if not m:
+            return "6~12 个章节节点"
+        n = int(m.group(1))
+        words = n * 1000 if m.group(2) == "千" else n * 10000
+        if words <= 10000:
+            return "3~6 个章节节点（短篇可少分章）"
+        per_ch = 3000
+        low = max(4, int(words / 4000))
+        high = max(low + 4, int(words / 2000))
+        return f"约 {low}~{high} 个章节节点（按目标篇幅，每章约 2~4 千字）"
+
+    @staticmethod
     def _ai_preplan_prompt(p: dict) -> str:
         from .dialogs.ai_preplan_dialog import MODULES
         label_map = {k: label for k, label, _o in MODULES}
@@ -1255,7 +1295,7 @@ class MainWindow(QMainWindow):
             f"【一句话创意】{p['creative']}\n"
             f"【主角设定提示】{p['protagonist'] or '由你合理设计'}\n"
             f"【风格基调】{p['style']}\n"
-            f"【目标篇幅】{p['length']}\n"
+            f"【目标篇幅】{p['length']}（大纲节点数必须与目标篇幅匹配，每章约 2~4 千字）\n"
             f"【核心冲突】{p['conflict'] or '由你设计'}\n"
             f"【需要生成的模块及用户指定】{mods}\n"
             "【输出要求】只输出一个 JSON 对象（不要 markdown 代码块标记、不要任何解释文字），结构如下：\n"
@@ -1264,7 +1304,8 @@ class MainWindow(QMainWindow):
             '"factions":"每行一个","places":"每行一个","attributes":"关键设定名，每行一个"},\n'
             '  "characters": [{"name":"","role":"主角/重要配角/反派","gender":"","age":"","appearance":"",'
             '"personality":"","desire":"","fear":"","flaw":"","background":"","faction":""}],   // 3~8 个\n'
-            '  "outline": [{"name":"","chapter":"第 1 章","conflict":"","foreshadow":"本节点埋设/回收的伏笔"}],   // 6~10 个，按起承转合\n'
+            '  "outline": [{"name":"","chapter":"第 1 章","conflict":"","foreshadow":"本节点埋设/回收的伏笔"}],'
+            f"   // 按目标篇幅规划章节：{_plan_chapter_hint(p['length'])}\n"
             '  "foreshadows": [{"name":"","desc":"","plant_chapter":"第 3 章","harvest_chapter":"第 20 章"}],   // 2~5 个\n'
             '  "storylines": [{"name":"","note":"","nodes":[{"title":"","chapter":"","detail":""}]}],   // 1~3 条线\n'
             '  "power_levels": [{"system_name":"","level":"","stage":"","description":""}],   // 力量体系 5~9 级\n'
@@ -1305,7 +1346,10 @@ class MainWindow(QMainWindow):
         def _review_round(round_no: int, data: dict):
             _progress(f"🔍 步骤 2/3：审查官第 {round_no} 轮 审查设定合理性…")
             self.log(f"AI 前期策划：审查官第 {round_no} 轮 审查中…", "info")
-            self.ai_panel.run_task(self._review_prompt(data), lambda t, e, _r=round_no, _d=data: _review_done(t, e, _r, _d), stream=False)
+            self.ai_panel.run_task(
+                self._review_prompt(data, length_hint=p.get("length", "")),
+                lambda t, e, _r=round_no, _d=data: _review_done(t, e, _r, _d),
+                stream=False)
 
         def _review_done(text, err, round_no, data):
             if err:

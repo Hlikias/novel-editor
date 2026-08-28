@@ -229,5 +229,18 @@ check("审查/修正/初稿各调用一次", sum("审查官" in c for c in calls
 win3.close()
 app.processEvents()
 
+# ---------- 8) 目标篇幅 → 大纲章节规模匹配 ----------
+from app.main_window import _plan_chapter_hint
+check("长篇提示 50~100 章", "50~100" in _plan_chapter_hint("长篇（约 20 万字）"))
+check("鸿篇提示 200+ 章", "250" in _plan_chapter_hint("鸿篇（约 100 万字）"))
+check("中篇提示 12~25 章", "12~25" in _plan_chapter_hint("中篇（约 5 万字）"))
+check("短篇 3~6 章", "3~6" in _plan_chapter_hint("短篇（约 5 千字）"))
+p9 = _MW._ai_preplan_prompt(
+    {"title": "X", "genre": "玄幻", "btype": "长篇小说", "creative": "c", "protagonist": "",
+     "style": "热血", "length": "长篇（约 20 万字）", "conflict": "",
+     "modules": [{"key": "outline", "spec": ""}]})
+check("prompt 按篇幅给章节规模", "按目标篇幅规划章节" in p9 and "50~100" in p9)
+check("审查官检查篇幅匹配", "篇幅-规模匹配" in _MW._review_prompt({"outline": []}, "长篇（约 20 万字）"))
+
 print("\nRESULT:", "ALL PASS" if ok else "HAS FAILURES")
 sys.exit(0 if ok else 1)
