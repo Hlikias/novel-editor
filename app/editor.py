@@ -284,20 +284,19 @@ class EditorWidget(QTextEdit):
 
     def _apply_viewport_geometry(self) -> None:
         """收窄 viewport：左缘 = 书签栏+行号区+页边距；右缘 = 页边距。
-        页边线关闭时右缘让回滚动条宽度，避免被滚动条遮挡。"""
+        用 setViewportMargins 实现（QAbstractScrollArea 会按 margins 自动布局
+        viewport，与 resize 时的几何重置天然一致，不会产生『重置全宽↔手动收窄』
+        的布局震荡死循环）；页边线关闭时右缘让回滚动条宽度，避免被遮挡。"""
         m = int(self._page_margin)
-        cr = self.contentsRect()
-        vp = self.viewport()
-        g = vp.geometry()
         if m > 0:
             right = m
         else:
             sb = self.verticalScrollBar()
             right = sb.width() if sb.isVisible() else 0
-        x = cr.left() + self._left_fixed() + m
-        w = max(1, cr.width() - self._left_fixed() - m - right)
-        if g.x() != x or g.width() != w:
-            vp.setGeometry(x, g.y(), w, g.height())
+        left = self._left_fixed() + m
+        vp_m = self.viewportMargins()
+        if (vp_m.left(), vp_m.right()) != (left, right):
+            self.setViewportMargins(left, vp_m.top(), right, vp_m.bottom())
 
     def update_line_number_area(self, rect, dy: int) -> None:
         if dy:
