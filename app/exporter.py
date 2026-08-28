@@ -94,6 +94,66 @@ def export_pdf(path: str, text: str, title: str = "") -> None:
     doc.print_(printer)
 
 
+def export_manju(path: str, text: str, title: str = "", encoding: str = "UTF-8") -> None:
+    """导出漫剧分镜脚本：把正文转成漫剧生成软件可读的结构化文本。
+
+    每段 = 一个镜头：非对白段作为「画面」，引号内对白提取为「台词」
+    （自动识别“XX说：”这类说话人），其余叙述作为「旁白」。
+    输出格式（漫剧软件通用的分镜文本）：
+        【镜头 N】 画面 / 台词：角色：内容 / 旁白
+    """
+    import re
+
+    def to_plain(body: str) -> str:
+        if "<" in body:
+            try:
+                from PySide6.QtGui import QTextDocument
+                doc = QTextDocument()
+                doc.setHtml(body)
+                return doc.toPlainText()
+            except Exception:  # noqa: BLE001
+                pass
+        return body
+
+    lines = [ln.strip() for ln in to_plain(text).replace("\r\n", "\n").split("\n") if ln.strip()]
+    items: list[tuple[str, str]] = []   # (kind, content)  kind: 画面/台词/旁白
+    speaker_re = re.compile(r"^([\u4e00-\u9fff]{1,6}?)(?:说|道|问|答|喊|叫|叹|低语|喃喃)[:：]")
+    dialog_re = re.compile(r"[“\"『「]([^”\"』」]{1,200})[”\"』」]")
+    for ln in lines:
+        dialogs = dialog_re.findall(ln)
+        if dialogs:
+            sp = speaker_re.match(ln)
+            speaker = sp.group(1) if sp else ""
+            rest = speaker_re.sub("", ln).strip()
+            # 引号外剩余文本（动作/描述）作为画面
+            non_dialog = dialog_re.sub("", rest).strip("，。！？；:： ")
+            if non_dialog and len(non_dialog) >= 4:
+                items.append(("画面", non_dialog))
+            for dl in dialogs:
+                items.append(("台词", (speaker + "：" if speaker else "") + dl))
+        else:
+            items.append(("画面" if len(ln) <= 40 else "旁白", ln))
+
+    out: list[str] = [f"═══ AI码小说 · 漫剧分镜脚本 ═══"]
+    if title:
+        out.append(f"《{title}》")
+    out.append("（格式：每个【镜头】= 一个画面单位；台词请按角色分配；旁白为叙述性文字）")
+    shot_no = 0
+    for kind, content in items:
+        if kind == "画面":
+            shot_no += 1
+            out.append("")
+            out.append(f"【镜头 {shot_no}】画面：{content}")
+        elif kind == "台词":
+            out.append(f"台词：{content}")
+        else:
+            out.append(f"旁白：{content}")
+    if shot_no == 0:
+        out.append("（没有可导出的画面内容）")
+    with open(path, "w", encoding=encoding) as f:
+        f.write("\n".join(out) + "\n")
+
+
 def export_pdf_formatted(path: str, text: str, title: str = "",
                          fmt: "DocFormat | None" = None) -> None:
     """按格式设置生成 PDF：标题（字体/字号/加粗/对齐）+ 正文（字号/字体/行距）。

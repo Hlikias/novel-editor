@@ -465,6 +465,7 @@ class MainWindow(QMainWindow):
         self._add_action(file_menu, "导出当前章节为文本…", self.export_current_chapter, None, "SP_DialogSaveButton")
         self._add_action(file_menu, "导出全部章节…", self.export_all_chapters, None, None)
         self._add_action(file_menu, "📄 导出为 Word（格式设置）…", self.export_current_docx, None, None)
+        self._add_action(file_menu, "🎬 导出漫剧脚本…", self.export_current_manju, None, None)
         self._add_action(file_menu, "📄 导出为 PDF…", self.export_current_pdf, None, None)
         self._add_action(file_menu, "🖨 打印当前文章…", self.print_current_chapter, "Ctrl+P", None)
         self._add_action(file_menu, "📋 按范本导出（AI）…", self._show_template_export_dialog, None, None)
@@ -3083,6 +3084,29 @@ class MainWindow(QMainWindow):
         return True
 
     # ---------- PDF 导出 / 打印 ----------
+    # ---------- 漫剧脚本导出 ----------
+    def export_current_manju(self):
+        """导出当前文章为漫剧分镜脚本（漫剧生成软件可用）。"""
+        editor = self.current_editor()
+        if editor is None:
+            QMessageBox.information(self, "提示", "没有打开的文章。")
+            return
+        ch_title = self._current_ch_title()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出漫剧脚本",
+            os.path.join(os.path.expanduser("~"), f"{ch_title or '文章'}-漫剧脚本.txt"),
+            "文本文件 (*.txt)",
+        )
+        if not path:
+            return
+        try:
+            from .exporter import export_manju
+            export_manju(path, editor.content(), ch_title)
+            self.log(f"已导出漫剧脚本: {path}", "ok")
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "导出失败", f"{e}")
+            self.log(f"导出失败: {e}", "error")
+
     def export_current_pdf(self):
         """导出当前文章为 PDF（按当前记忆/默认格式渲染：标题居中、正文缩进与行距）。"""
         editor = self.current_editor()

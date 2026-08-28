@@ -239,6 +239,30 @@ check("layout_instructions 含列表说明", "列表" in parsed2.layout_instruct
 check("layout_instructions 含页眉", "页眉" in parsed2.layout_instructions())
 check("describe 含列表", "列表" in parsed2.describe())
 
+# ---------- 漫剧脚本导出 ----------
+from app.exporter import export_manju
+manju = os.path.join(d, "manju.txt")
+export_manju(manju, "　　林晚推开门，屋外风雪正紧。\n"
+                     "　　林晚说：“我一定要找到师父！”\n"
+                     "　　剑光一闪。\n"
+                     "　　“师父？”她低声问。", "风雪夜")
+mt = open(manju, encoding="utf-8").read()
+check("漫剧导出含镜头", "【镜头 1】" in mt and "【镜头 2】" in mt)
+check("漫剧导出含画面", "画面：" in mt)
+check("漫剧台词提取说话人", "台词：林晚：" in mt)
+check("漫剧导出标题", "《风雪夜》" in mt)
+
+# 菜单入口
+from app.main_window import MainWindow as _MW2
+win_m = _MW2()
+flat_m = []
+for _name, menu in getattr(win_m, "_menus", []):
+    for a in menu.actions():
+        if not a.menu():
+            flat_m.append(a.text())
+check("菜单含导出漫剧", any("漫剧" in t for t in flat_m))
+win_m.close()
+
 # 打印：patch QPrintDialog.exec → 取消，流程不崩
 from PySide6.QtPrintSupport import QPrintDialog
 old_exec = QPrintDialog.exec
