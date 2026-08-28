@@ -514,6 +514,7 @@ class MainWindow(QMainWindow):
         self._add_action(project_menu, "🗑 回收站…", self._show_recycle_dialog, None, None)
         self._char_mgr_action = self._add_action(project_menu, "👥 大纲 / 世界观 / 角色管理…", self.show_character_dialog, "Ctrl+Shift+R", None)
         self._planning_action = self._add_action(project_menu, "📐 创作规划（伏笔/章节卡片/体系/剧情线/时间线）", lambda: self._show_planning_dialog(True), "Ctrl+Shift+P", None)
+        self._preplan_action = self._add_action(project_menu, "🤖 AI 一键前期策划…", self._show_ai_preplan_dialog, None, None)
         self._usage_action = self._add_action(project_menu, "📊 设定利用率报告…", self._show_setting_usage, None, None)
         project_menu.addSeparator()
         self._add_action(project_menu, "📊 统计视图", self.show_stats_view, None, None)
@@ -1191,6 +1192,209 @@ class MainWindow(QMainWindow):
         from .dialogs.usage_dialog import UsageDialog
         dlg = UsageDialog(self.storage, self)
         dlg.exec()
+
+    # ---------- AI 一键前期策划 ----------
+    def _show_ai_preplan_dialog(self):
+        if self.storage is None:
+            QMessageBox.information(self, "提示", "请先打开项目。")
+            return
+        if not hasattr(self, "_ai_preplan_dialog") or self._ai_preplan_dialog is None:
+            from .dialogs.ai_preplan_dialog import AIPreplanDialog
+            book = self.storage.get_book()
+            self._ai_preplan_dialog = AIPreplanDialog(
+                self,
+                on_generate=self._ai_preplan_generate,
+                on_write=self._ai_preplan_write,
+                default_title=book.title if book else "",
+                default_genre=book.genre if book else "玄幻",
+            )
+        self._ai_preplan_dialog.show()
+        self._ai_preplan_dialog.raise_()
+        self._ai_preplan_dialog.activateWindow()
+
+    @staticmethod
+    def _ai_preplan_prompt(p: dict) -> str:
+        modules = "、".join(p["modules"])
+        return (
+            "你是一位资深小说前期策划师。请为《" + (p["title"] or "未命名作品")
+            + f"》（{p['genre']} · {p['btype']}）生成完整前期设定，帮助作者开始写作。\n"
+            f"【一句话创意】{p['creative']}\n"
+            f"【主角设定提示】{p['protagonist'] or '由你合理设计'}\n"
+            f"【风格基调】{p['style']}\n"
+            f"【目标篇幅】{p['length']}\n"
+            f"【核心冲突】{p['conflict'] or '由你设计'}\n"
+            f"【需要生成的模块】{modules}\n"
+            "【输出要求】只输出一个 JSON 对象（不要 markdown 代码块标记、不要任何解释文字），结构如下：\n"
+            "{\n"
+            '  "worldview": {"name":"","genre":"","description":"","era":"","rules":"",'
+            '"factions":"每行一个","places":"每行一个","attributes":"关键设定名，每行一个"},\n'
+            '  "characters": [{"name":"","role":"主角/重要配角/反派","gender":"","age":"","appearance":"",'
+            '"personality":"","desire":"","fear":"","flaw":"","background":"","faction":""}],   // 3~8 个\n'
+            '  "outline": [{"name":"","chapter":"第 1 章","conflict":"","foreshadow":"本节点埋设/回收的伏笔"}],   // 6~10 个，按起承转合\n'
+            '  "foreshadows": [{"name":"","desc":"","plant_chapter":"第 3 章","harvest_chapter":"第 20 章"}],   // 2~5 个\n'
+            '  "storylines": [{"name":"","note":"","nodes":[{"title":"","chapter":"","detail":""}]}],   // 1~3 条线\n'
+            '  "power_levels": [{"system_name":"","level":"","stage":"","description":""}],   // 力量体系 5~9 级\n'
+            '  "tech_nodes": [{"name":"","level":"","deps":"","description":""}],   // 科技树\n'
+            '  "timeline": [{"title":"","chapter":"","characters":"","result":""}],\n'
+            '  "maps": [{"name":"","desc":""}]\n'
+            "}\n"
+            "所有内容用中文；字符串内不要包含双引号；未勾选生成的模块对应字段给空数组/空对象。"
+        )
+
+    def _ai_preplan_generate(self, p: dict, done_cb):
+        prompt = self._ai_preplan_prompt(p)
+        self.log("AI 一键前期策划中…", "info")
+
+        def _on_ai(text, err):
+            if err:
+                done_cb(None, str(err))
+                return
+            from .dialogs.ai_preplan_dialog import _parse_preplan_json
+            data = _parse_preplan_json(text or "")
+            done_cb(data, None if data else "AI 输出不是有效的 JSON")
+
+        self.ai_panel.run_task(prompt, _on_ai, stream=False)
+
+    def _ai_preplan_write(self, data: dict, done_cb):
+        """把 AI 生成的前期设定写入项目（各规划表）。"""
+        try:
+            import json as _json
+            from .models import (Character, Foreshadow, NovelMap, PlotNode,
+                                 PowerLevel, StorylineLine, StorylineNode,
+                                 TechNode, TimelineEvent, Worldview)
+            st = self.storage
+            book = st.get_book()
+            bid = book.id
+            n_chars = n_outline = n_fs = n_lines = n_nodes = n_pl = 0
+            # 世界观（唯一；已存在时覆盖需确认）
+            wv = data.get("worldview") or {}
+            if wv and wv.get("name"):
+                existing = st.get_single_worldview()
+                if existing is not None:
+                    if QMessageBox.question(
+                        self, "覆盖世界观",
+                        f"项目中已存在世界观《{existing.name}》，是否用新世界观覆盖？",
+                    ) == QMessageBox.StandardButton.Yes:
+                        st.delete_worldview(existing.id)
+                    else:
+                        wv = {}
+                if wv and wv.get("name"):
+                    st.add_worldview(Worldview(
+                        book_id=bid,
+                        name=str(wv.get("name", "")),
+                        genre=str(wv.get("genre", "") or book.genre),
+                        description=str(wv.get("description", "")),
+                        era=str(wv.get("era", "")),
+                        rules=str(wv.get("rules", "")),
+                        factions=str(wv.get("factions", "")),
+                        places=str(wv.get("places", "")),
+                        attributes=str(wv.get("attributes", "")),
+                    ))
+            # 角色（同名跳过）
+            for c in data.get("characters") or []:
+                name = str(c.get("name", "")).strip()
+                if not name:
+                    continue
+                dup = any((x.name or "").strip() == name for x in st.list_characters())
+                if dup:
+                    continue
+                st.add_character(Character(
+                    book_id=bid, name=name,
+                    role=str(c.get("role", "") or "配角"),
+                    gender=str(c.get("gender", "")),
+                    age=str(c.get("age", "")),
+                    appearance=str(c.get("appearance", "")),
+                    personality=str(c.get("personality", "")),
+                    desire=str(c.get("desire", "")),
+                    fear=str(c.get("fear", "")),
+                    flaw=str(c.get("flaw", "")),
+                    background=str(c.get("background", "")),
+                    faction=str(c.get("faction", "")),
+                ))
+                n_chars += 1
+            # 大纲节点
+            for i, n in enumerate(data.get("outline") or []):
+                name = str(n.get("name", "")).strip()
+                if not name:
+                    continue
+                st.add_plot_node(PlotNode(
+                    book_id=bid, order=i + 1, name=name,
+                    chapter=str(n.get("chapter", "")),
+                    conflict=str(n.get("conflict", "")),
+                    foreshadow=str(n.get("foreshadow", "")),
+                ))
+                n_outline += 1
+            # 伏笔
+            for f in data.get("foreshadows") or []:
+                name = str(f.get("name", "")).strip()
+                if not name:
+                    continue
+                st.add_foreshadow(Foreshadow(
+                    book_id=bid, name=name, desc=str(f.get("desc", "")),
+                    plant_chapter=str(f.get("plant_chapter", "")),
+                    harvest_chapter=str(f.get("harvest_chapter", "")),
+                ))
+                n_fs += 1
+            # 剧情线
+            for s in data.get("storylines") or []:
+                name = str(s.get("name", "")).strip()
+                if not name:
+                    continue
+                line_id = st.add_storyline_line(StorylineLine(
+                    book_id=bid, name=name, note=str(s.get("note", ""))))
+                n_lines += 1
+                for i, nd in enumerate(s.get("nodes") or []):
+                    t = str(nd.get("title", "")).strip()
+                    if not t:
+                        continue
+                    st.add_storyline_node(StorylineNode(
+                        book_id=bid, line_id=line_id, title=t,
+                        chapter=str(nd.get("chapter", "")),
+                        detail=str(nd.get("detail", "")), order=i + 1))
+                    n_nodes += 1
+            # 力量体系
+            for i, pl in enumerate(data.get("power_levels") or []):
+                level = str(pl.get("level", "")).strip()
+                if not level:
+                    continue
+                st.add_power_level(PowerLevel(
+                    book_id=bid, system_name=str(pl.get("system_name", "") or "力量体系"),
+                    level=level, stage=str(pl.get("stage", "")),
+                    description=str(pl.get("description", "")), order=i + 1))
+                n_pl += 1
+            # 科技树
+            for i, tn in enumerate(data.get("tech_nodes") or []):
+                name = str(tn.get("name", "")).strip()
+                if not name:
+                    continue
+                st.add_tech_node(TechNode(
+                    book_id=bid, name=name, level=str(tn.get("level", "")),
+                    deps=str(tn.get("deps", "")),
+                    description=str(tn.get("description", "")), order=i + 1))
+            # 时间线
+            for i, ev in enumerate(data.get("timeline") or []):
+                title = str(ev.get("title", "")).strip()
+                if not title:
+                    continue
+                st.add_timeline_event(TimelineEvent(
+                    book_id=bid, title=title, chapter=str(ev.get("chapter", "")),
+                    characters=str(ev.get("characters", "")),
+                    result=str(ev.get("result", "")), order=i + 1))
+            # 地图
+            for m in data.get("maps") or []:
+                name = str(m.get("name", "")).strip()
+                if not name:
+                    continue
+                st.add_map(NovelMap(book_id=bid, name=name))
+            self._refresh_chapter_dock()
+            self._sync_planning_features()
+            self.log(
+                f"AI 前期策划已写入：角色 {n_chars}、大纲 {n_outline}、伏笔 {n_fs}、"
+                f"剧情线 {n_lines} 条（{n_nodes} 节点）、力量体系 {n_pl} 级", "ok")
+            done_cb(None)
+        except Exception as e:  # noqa: BLE001
+            self.log(f"AI 前期策划写入失败: {e}", "error")
+            done_cb(str(e))
 
     def _gen_chapter_prompt(self, req: dict, prev_tail: str, book_title: str,
                             context: str = "") -> str:
@@ -2220,6 +2424,7 @@ class MainWindow(QMainWindow):
             (getattr(self, "_storyline_action", None), has_plan),
             (getattr(self, "_char_mgr_action", None), has_char),
             (getattr(self, "_planning_action", None), has_plan),
+            (getattr(self, "_preplan_action", None), has_char),
             (getattr(self, "_usage_action", None), has_char),
         ):
             if act is not None:
