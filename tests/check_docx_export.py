@@ -191,6 +191,55 @@ from app.docx_export import extract_template_text
 txt = extract_template_text(tpl)
 check("范本文本提取非空", len(txt.strip()) > 0 and "范本标题" in txt)
 
+# ---------- 列表 + 页眉页脚 一比一 ----------
+# 1) 导出含列表的文档：- 与 1. 开头行 → Word 原生列表样式
+out5 = os.path.join(d, "list.docx")
+export_docx_formatted(
+    out5,
+    "正文段落。\n- 无序项甲\n- 无序项乙\n1. 有序项一\n2. 有序项二\n结尾段落。",
+    title="列表文档",
+    fmt=DocFormat(name="列表"),
+)
+doc5 = Document(out5)
+styles5 = [p.style.name for p in doc5.paragraphs if p.text.strip()]
+check("无序列表用 List Bullet", any("List Bullet" in s for s in styles5))
+check("有序列表用 List Number", any("List Number" in s for s in styles5))
+check("普通段落保留", any(s not in ("List Bullet", "List Number") and "List" not in s for s in styles5))
+
+# 2) 页眉页脚导出
+out6 = os.path.join(d, "hf.docx")
+hf_fmt = DocFormat(header_text="《山居笔记》", footer_text="第 1 页", name="页眉页脚")
+export_docx_formatted(out6, "正文。", title="文章", fmt=hf_fmt)
+doc6 = Document(out6)
+hdr = "".join(p.text for p in doc6.sections[0].header.paragraphs)
+ftr = "".join(p.text for p in doc6.sections[0].footer.paragraphs)
+check("页眉导出", "《山居笔记》" in hdr)
+check("页脚导出", "第 1 页" in ftr)
+
+# 3) 构造含列表+页眉页脚的范本 → 解析
+tpl2 = os.path.join(d, "tpl2.docx")
+td2 = Document()
+td2.sections[0].header.paragraphs[0].add_run("学校文件")
+td2.sections[0].footer.paragraphs[0].add_run("机密")
+tp = td2.add_paragraph()
+tp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+tr = tp.add_run("文件标题")
+tr.font.bold = True
+tr.font.size = Pt(16.0)
+td2.add_paragraph("正文第一段。")
+td2.add_paragraph("要点一", style="List Bullet")
+td2.add_paragraph("要点二", style="List Bullet")
+td2.add_paragraph("步骤一", style="List Number")
+td2.save(tpl2)
+parsed2 = parse_template(tpl2)
+check("范本解析出无序列表", parsed2.list_bullet is True)
+check("范本解析出有序列表", parsed2.list_numbered is True)
+check("范本解析出页眉", parsed2.header_text == "学校文件")
+check("范本解析出页脚", parsed2.footer_text == "机密")
+check("layout_instructions 含列表说明", "列表" in parsed2.layout_instructions())
+check("layout_instructions 含页眉", "页眉" in parsed2.layout_instructions())
+check("describe 含列表", "列表" in parsed2.describe())
+
 # 打印：patch QPrintDialog.exec → 取消，流程不崩
 from PySide6.QtPrintSupport import QPrintDialog
 old_exec = QPrintDialog.exec

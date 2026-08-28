@@ -31,7 +31,7 @@ ALIGN_REV = {v: k for k, v in ALIGN_MAP.items()}
 
 @dataclass
 class DocFormat:
-    """导出/范本格式参数（标题 + 正文）。"""
+    """导出/范本格式参数（标题 + 正文 + 列表 + 页眉页脚）。"""
     title_font: str = "黑体"
     title_size: float = 16.0            # pt（三号）
     title_bold: bool = True
@@ -42,17 +42,56 @@ class DocFormat:
     line_spacing: float = 1.5           # 行距（倍数）
     space_before: float = 0.0           # 段前（pt）
     space_after: float = 6.0            # 段后（pt）
+    list_bullet: bool = False           # 范本含无序列表（圆点）
+    list_numbered: bool = False         # 范本含有序列表（数字）
+    header_text: str = ""               # 页眉文本（空=无）
+    footer_text: str = ""               # 页脚文本（空=无）
     name: str = "默认"
 
     def describe(self) -> str:
-        """一行可读描述（用于界面展示 / AI prompt）。"""
-        return (
+        """一行可读描述（用于界面展示）。"""
+        parts = [
             f"标题：{self.title_font} {self.title_size:g}磅"
-            f"{' 加粗' if self.title_bold else ''} {ALIGN_NAMES.get(self.title_align, '居中')}；"
+            f"{' 加粗' if self.title_bold else ''} {ALIGN_NAMES.get(self.title_align, '居中')}",
             f"正文：{self.body_font} {self.body_size:g}磅，"
             f"首行缩进 {self.first_indent_chars:g} 字符，"
-            f"行距 {self.line_spacing:g} 倍，段前 {self.space_before:g}pt 段后 {self.space_after:g}pt"
-        )
+            f"行距 {self.line_spacing:g} 倍，段前 {self.space_before:g}pt 段后 {self.space_after:g}pt",
+        ]
+        if self.list_bullet or self.list_numbered:
+            kinds = []
+            if self.list_bullet:
+                kinds.append("圆点")
+            if self.list_numbered:
+                kinds.append("数字")
+            parts.append("列表：" + "、".join(kinds) + "编号")
+        if self.header_text:
+            parts.append(f"页眉：{self.header_text[:20]}")
+        if self.footer_text:
+            parts.append(f"页脚：{self.footer_text[:20]}")
+        return "；".join(parts)
+
+    def layout_instructions(self) -> str:
+        """给 AI 的详细排版说明（导出时程序将按范本一比一套用）。"""
+        lines = [
+            "【排版规范（导出时程序将按范本一比一套用，你只需输出内容与结构）】",
+            f"- 标题：{self.title_font} {self.title_size:g}磅"
+            f"{' 加粗' if self.title_bold else ''}，{ALIGN_NAMES.get(self.title_align, '居中')}",
+            f"- 正文：{self.body_font} {self.body_size:g}磅，首行缩进 {self.first_indent_chars:g} 字符，"
+            f"行距 {self.line_spacing:g} 倍，段前 {self.space_before:g}pt 段后 {self.space_after:g}pt",
+        ]
+        if self.list_bullet or self.list_numbered:
+            kinds = []
+            if self.list_bullet:
+                kinds.append("无序列表（圆点）")
+            if self.list_numbered:
+                kinds.append("有序列表（数字编号）")
+            lines.append(f"- 列表：文档中包含{'、'.join(kinds)}，请把列表内容逐项分行，"
+                         f"无序项行首加「- 」，有序项行首加「1. 」（连续递增）")
+        if self.header_text:
+            lines.append(f"- 页眉：{self.header_text}")
+        if self.footer_text:
+            lines.append(f"- 页脚：{self.footer_text}")
+        return "\n".join(lines)
 
     def to_config(self) -> dict:
         return asdict(self)
@@ -99,12 +138,50 @@ def _set_first_line_indent(p, chars: float, body_size_pt: float):
     ind.set(qn("w:firstLine"), str(int(max(0.0, chars) * body_size_pt * 20)))
 
 
+# 列表行识别：无序（- • · *）与有序（1. 1) （1））
+_BULLET_RE = None
+_NUMBER_RE = None
+
+
+def _list_kind(line: str) -> str | None:
+    """返回 'bullet' / 'number' / None（行是否为列表项）。"""
+    global _BULLET_RE, _NUMBER_RE
+    import re
+    if _BULLET_RE is None:
+        _BULLET_RE = re.compile(r"^\s*[-•·*‣]\s+\S")
+        _NUMBER_RE = re.compile(r"^\s*(?:\d+[\.、)．]|（\d+）|[一二三四五六七八九十]+[、.．])\s+\S")
+    if _BULLET_RE.match(line):
+        return "bullet"
+    if _NUMBER_RE.match(line):
+        return "number"
+    return None
+
+
 def export_docx_formatted(path: str, text: str, title: str = "",
                           fmt: DocFormat | None = None) -> None:
-    """按格式生成 docx：标题（居中/加粗/字号/字体）+ 正文（缩进/行距/段间距）。"""
+    """按格式生成 docx：标题 + 正文 + 列表 + 页眉页脚，与范本格式一比一。
+
+    列表：正文中以「- 」「1. 」等标记开头的行导出为 Word 原生列表
+    （List Bullet / List Number 样式，自动编号与圆点）。
+    页眉页脚：fmt.header_text / footer_text 写入节页眉页脚（居中，正文同字体小一号）。"""
     fmt = fmt or DocFormat()
     doc = Document()
-    # 页面边距默认（A4 上下 2.54cm 左右 3.17cm，保持 Word 默认）
+    # ---- 页眉页脚 ----
+    section = doc.sections[0]
+    if fmt.header_text:
+        hp = section.header.paragraphs[0]
+        hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        hr = hp.add_run(fmt.header_text)
+        _set_run_font(hr, fmt.body_font)
+        hr.font.size = Pt(max(9.0, fmt.body_size - 2.0))
+    if fmt.footer_text:
+        fp = section.footer.paragraphs[0]
+        fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        fr = fp.add_run(fmt.footer_text)
+        _set_run_font(fr, fmt.body_font)
+        fr.font.size = Pt(max(9.0, fmt.body_size - 2.0))
+
+    # ---- 标题 ----
     if title:
         p = doc.add_paragraph()
         p.alignment = ALIGN_MAP.get(fmt.title_align, WD_ALIGN_PARAGRAPH.CENTER)
@@ -121,13 +198,29 @@ def export_docx_formatted(path: str, text: str, title: str = "",
             paras.append(ln.strip())
         elif paras and paras[-1] != "":   # 保留一个空行分段
             paras.append("")
-    if not paras:
-        paras = [""]
 
+    # ---- 正文 / 列表 ----
     for ln in paras:
         if not ln:
             p = doc.add_paragraph()
             p.paragraph_format.space_after = Pt(0)
+            continue
+        kind = _list_kind(ln)
+        if kind:
+            # 列表项：用 Word 原生列表样式，去掉行首标记
+            text_body = ln
+            if kind == "bullet":
+                text_body = text_body.lstrip("-•·*‣ ").lstrip()
+                p = doc.add_paragraph(style="List Bullet")
+            else:
+                text_body = _strip_number_prefix(text_body)
+                p = doc.add_paragraph(style="List Number")
+            pf = p.paragraph_format
+            pf.line_spacing = fmt.line_spacing
+            pf.space_after = Pt(fmt.space_after)
+            r = p.add_run(text_body)
+            _set_run_font(r, fmt.body_font)
+            r.font.size = Pt(fmt.body_size)
             continue
         p = doc.add_paragraph()
         pf = p.paragraph_format
@@ -140,6 +233,12 @@ def export_docx_formatted(path: str, text: str, title: str = "",
         _set_run_font(r, fmt.body_font)
         r.font.size = Pt(fmt.body_size)
     doc.save(path)
+
+
+def _strip_number_prefix(line: str) -> str:
+    """去掉有序列表行首编号（1. / 1、 / （1） / 一、 等）。"""
+    import re
+    return re.sub(r"^\s*(?:\d+[\.、)．]|（\d+）|[一二三四五六七八九十]+[、.．])\s*", "", line).strip()
 
 
 # ---------------------------------------------------------------- 范本解析
@@ -249,6 +348,37 @@ def parse_template(path: str) -> DocFormat:
     fmt.line_spacing = _para_line_spacing(body_p)
     fmt.space_before = _para_space(body_p, "space_before")
     fmt.space_after = _para_space(body_p, "space_after")
+
+    # ---- 列表检测（样式含 List，或行首为列表标记） ----
+    for p in paras[1:]:
+        try:
+            st = p.style.name or ""
+        except Exception:  # noqa: BLE001
+            st = ""
+        if "List" in st:
+            if "Number" in st:
+                fmt.list_numbered = True
+            else:
+                fmt.list_bullet = True
+            continue
+        kind = _list_kind(p.text)
+        if kind == "bullet":
+            fmt.list_bullet = True
+        elif kind == "number":
+            fmt.list_numbered = True
+
+    # ---- 页眉 / 页脚 ----
+    try:
+        sec = doc.sections[0]
+        for part, attr in ((sec.header, "header_text"), (sec.footer, "footer_text")):
+            try:
+                texts = [pp.text.strip() for pp in part.paragraphs if pp.text.strip()]
+            except Exception:  # noqa: BLE001
+                texts = []
+            if texts:
+                setattr(fmt, attr, texts[0])
+    except Exception:  # noqa: BLE001
+        pass
     return fmt
 
 

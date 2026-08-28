@@ -2639,7 +2639,7 @@ class MainWindow(QMainWindow):
         if mode == "ai_gen":
             prompt = (
                 "你是一位资深中文写作者。请按用户要求写一篇文章。\n"
-                f"【排版规范（程序将按所选格式套用，你只需输出标题与正文）】\n{fmt.describe()}\n"
+                + fmt.layout_instructions() + "\n"
             )
             if tpl_text:
                 prompt += (
@@ -2653,13 +2653,14 @@ class MainWindow(QMainWindow):
                 "【输出要求】\n"
                 "1. 第一行输出文章标题；\n"
                 "2. 第二行起为正文，自然分段，段落间用空行分隔；\n"
-                "3. 不要输出任何解释性文字、不要用 Markdown 符号。"
+                "3. 若文档含列表，列表项单独成行，无序项行首加「- 」，有序项行首加「1. 」（连续递增）；\n"
+                "4. 不要输出任何解释性文字、不要用 Markdown 符号。"
             )
         else:   # ai_polish
             prompt = (
                 "你是资深中文编辑。请润色以下文章：保持原意与整体结构，改进语言表达、"
                 "修正语病与用词，使其更流畅优美。\n"
-                f"【排版规范（程序将按所选格式套用，你只需输出标题与正文）】\n{fmt.describe()}\n"
+                + fmt.layout_instructions() + "\n"
             )
             if tpl_text:
                 prompt += (
@@ -2670,6 +2671,7 @@ class MainWindow(QMainWindow):
                 f"【附加要求】{extra if extra else '无'}\n"
                 "【原文】\n" + text + "\n"
                 "【输出要求】第一行输出标题，第二行起为正文，自然分段（空行分段），"
+                "列表项单独成行（无序「- 」，有序「1. 」递增），"
                 "不要解释性文字、不要用 Markdown 符号。"
             )
         self.log("AI 按格式处理中…", "info")
