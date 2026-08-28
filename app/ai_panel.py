@@ -173,11 +173,14 @@ class AIPanel(QWidget):
         self.output_edit.setPlaceholderText("AI 生成的内容会显示在这里……")
         out_layout.addWidget(self.output_edit)
 
-        # 提问/回答 框：随 dock 位置自适应方向（底部=左右分布，两侧=上下分布）
+        # 提问/回答 框：随 dock 位置自适应方向与顺序
+        # 底部=左右分布（右输入/左回答），两侧=上下分布（上输入/下回答）
+        self.prompt_box = prompt_box
+        self.out_box = out_box
         self._io_splitter = QSplitter()
+        self._io_splitter.setChildrenCollapsible(False)
         self._io_splitter.addWidget(prompt_box)
         self._io_splitter.addWidget(out_box)
-        self._io_splitter.setChildrenCollapsible(False)
         self._io_splitter.setOrientation(Qt.Orientation.Vertical)   # 默认上下（两侧）
         layout.addWidget(self._io_splitter, 1)
 
@@ -204,7 +207,8 @@ class AIPanel(QWidget):
 
     # ---------- 布局自适应 ----------
     def set_layout_for_dock(self, area) -> None:
-        """按 dock 区域切换 提问/回答 布局：底部/顶部=左右分布，左右两侧=上下分布。"""
+        """按 dock 区域切换 提问/回答 布局：
+        底部/顶部=左右分布（右输入、左回答）；左右两侧=上下分布（上输入、下回答）。"""
         try:
             from PySide6.QtCore import Qt as _Qt
             bottom_like = area in (
@@ -213,6 +217,11 @@ class AIPanel(QWidget):
             )
         except Exception:  # noqa: BLE001
             bottom_like = False
+        # 期望顺序：左右分布 → [回答, 提问]（左回答/右输入）；上下分布 → [提问, 回答]
+        desired = [self.out_box, self.prompt_box] if bottom_like else [self.prompt_box, self.out_box]
+        for idx, w in enumerate(desired):
+            if self._io_splitter.indexOf(w) != idx:
+                self._io_splitter.insertWidget(idx, w)   # 已存在的 widget 会被移动位置
         self._io_splitter.setOrientation(
             Qt.Orientation.Horizontal if bottom_like else Qt.Orientation.Vertical
         )
