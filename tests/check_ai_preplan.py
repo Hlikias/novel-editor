@@ -61,7 +61,11 @@ check("风格基调可编辑", dlg.style_combo.isEditable())
 dlg.style_combo.setEditText("穿越+搞笑")   # 自定义风格
 p = dlg.params()
 check("弹窗参数收集", p["title"] == "剑与星辰" and p["genre"] == "玄幻"
-      and p["style"] == "穿越+搞笑")
+      and p["style"] == "穿越+搞笑" and p["review"] is True)
+check("审查官默认启用", dlg.review_check.isChecked())
+dlg.review_check.setChecked(False)
+check("可关闭审查官", dlg.params()["review"] is False)
+dlg.review_check.setChecked(True)
 check("模块含指定项", any(m["key"] == "worldview" for m in p["modules"]))
 dlg.module_specs["worldview"].setPlainText("灵气复苏+宗门林立，主角是穿越者")
 dlg.module_checks["maps"].setChecked(False)
@@ -186,6 +190,43 @@ check("创作规划含 伏笔/剧情线/体系/时间线", any("伏笔" in t for
       and any("时间线" in t for t in tab_p))
 pd.close()
 st_r2.close()
+app.processEvents()
+
+# ---------- 7) 审查官迭代流程 ----------
+win3 = MainWindow()
+win3._set_project(Storage(st.db_path))
+calls = []
+
+def fake_run(prompt, cb, stream=False):
+    calls.append(prompt)
+    base = ('{"worldview": {"name": "九州", "description": "X"}, "characters": [{"name": "林晚", "role": "主角"}],'
+            ' "outline": [], "foreshadows": [], "storylines": [], "power_levels": [],'
+            ' "tech_nodes": [], "timeline": [], "maps": []}')
+    if "修订" in prompt:
+        cb(base.replace('"description": "X"', '"description": "已修正"'), None)
+    elif "审查官" in prompt:
+        cb('{"issues": [{"type": "逻辑矛盾", "desc": "主角与世界观冲突"}]}', None)
+    else:
+        cb(base, None)
+    return None
+
+orig_rt = win3.ai_panel.run_task
+win3.ai_panel.run_task = fake_run
+prog, result = [], []
+win3._ai_preplan_generate(
+    {"title": "X", "genre": "玄幻", "btype": "长篇小说", "creative": "c", "protagonist": "",
+     "style": "热血", "length": "长篇（约 20 万字）", "conflict": "",
+     "modules": [{"key": "worldview", "spec": ""}], "review": True},
+    prog.append, lambda d, e: result.append((d, e)))
+win3.ai_panel.run_task = orig_rt
+check("审查迭代完成且无错误", result and result[0][1] is None)
+check("审查后采用修正版", result and result[0][0]["worldview"]["description"] == "已修正")
+check("审查进度提示", any("审查官" in m for m in prog)
+      and any("发现" in m and "问题" in m for m in prog)
+      and any("审查通过" in m or "迭代上限" in m for m in prog))
+check("审查/修正/初稿各调用一次", sum("审查官" in c for c in calls) >= 1
+      and sum("修订" in c for c in calls) >= 1)
+win3.close()
 app.processEvents()
 
 print("\nRESULT:", "ALL PASS" if ok else "HAS FAILURES")

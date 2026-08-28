@@ -30,6 +30,35 @@ def _parse_preplan_json(text: str) -> dict | None:
         return data if isinstance(data, dict) else None
     except Exception:  # noqa: BLE001
         return None
+
+
+def _parse_issues(text: str) -> list:
+    """解析审查官输出的问题清单：优先 JSON {"issues":[{type,desc}]}，失败按文本行提取。"""
+    import json
+    import re
+    if not text:
+        return []
+    m = re.search(r"\{.*\}", text, re.S)
+    if m:
+        try:
+            obj = json.loads(m.group(0))
+            if isinstance(obj, dict) and isinstance(obj.get("issues"), list):
+                out = []
+                for i in obj["issues"]:
+                    if isinstance(i, dict) and str(i.get("desc", "")).strip():
+                        out.append(str(i["desc"]).strip())
+                return out
+        except Exception:  # noqa: BLE001
+            pass
+    # 兜底：按行提取问题描述
+    out = []
+    for ln in text.splitlines():
+        s = ln.strip().lstrip("-•·0123456789.、）( ")
+        if 4 <= len(s) <= 200 and s not in out:
+            out.append(s)
+        if len(out) >= 10:
+            break
+    return out
 STYLES = ["热血", "悬疑", "轻松", "虐心", "群像", "文艺", "沉稳", "幽默", "暗黑",
           "穿越", "搞笑/沙雕", "甜宠", "无限流", "克苏鲁", "赛博朋克", "修真", "种田"]
 LENGTHS = ["短篇（约 5 千字）", "中篇（约 5 万字）", "长篇（约 20 万字）", "鸿篇（约 100 万字）"]
@@ -117,6 +146,9 @@ class AIPreplanDialog(GradientDialog):
 
         # 按钮
         btn_row = QHBoxLayout()
+        self.review_check = QCheckBox("🔍 启用审查官（生成后自动审查合理性，发现问题会迭代修正）")
+        self.review_check.setToolTip("审查官会检查 逻辑矛盾/设定冲突/完整性/伏笔连贯/规则自洽，发现问题自动修正再审查。\n⚠ 会多次调用 AI，消耗更多 token。")
+        self.review_check.setChecked(True)
         self.gen_btn = QPushButton("🤖 生成前期设定")
         self.gen_btn.clicked.connect(self._generate)
         self.write_btn = QPushButton("💾 写入项目")
@@ -124,6 +156,7 @@ class AIPreplanDialog(GradientDialog):
         self.write_btn.setEnabled(False)
         self.status = QLabel("")
         self.status.setObjectName("mutedLabel")
+        btn_row.addWidget(self.review_check)
         btn_row.addWidget(self.gen_btn)
         btn_row.addWidget(self.write_btn)
         btn_row.addWidget(self.status)
@@ -155,6 +188,7 @@ class AIPreplanDialog(GradientDialog):
             "length": self.length_combo.currentText(),
             "conflict": self.conflict_edit.text().strip(),
             "modules": mods,
+            "review": self.review_check.isChecked(),
         }
 
     def _generate(self):
@@ -174,9 +208,13 @@ class AIPreplanDialog(GradientDialog):
         self.gen_btn.setEnabled(False)
         self.write_btn.setEnabled(False)
         n = len(p["modules"])
-        self.status.setText(
-            f"⏳ 步骤 1/2：AI 正在生成前期设定（共 {n} 个模块，内容较多，请稍候 1~3 分钟）…")
-        self.on_generate(p, self._done)
+        if self.review_check.isChecked():
+            self.status.setText(
+                f"⏳ 步骤 1/2：AI 生成前期设定（{n} 个模块）→ 审查官审查迭代（会多次调用 AI，多耗 token）…")
+        else:
+            self.status.setText(
+                f"⏳ 步骤 1/2：AI 正在生成前期设定（共 {n} 个模块，内容较多，请稍候 1~3 分钟）…")
+        self.on_generate(p, self._progress, self._done)
 
     def _done(self, data, err):
         self._busy = False

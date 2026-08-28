@@ -1194,6 +1194,35 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     # ---------- AI 一键前期策划 ----------
+    @staticmethod
+    def _review_prompt(data: dict) -> str:
+        """审查官 prompt：检查设定合理性，输出问题清单 JSON。"""
+        import json as _j
+        return (
+            "你是一位严格的小说设定审查官。请审查以下 AI 生成的小说前期设定，"
+            "找出其中的问题：逻辑矛盾、设定冲突、完整性缺失（如角色没融入世界观）、"
+            "伏笔无法回收、规则不自洽（如金手指规则违背自身设定）、人物动机不成立等。\n"
+            "【设定内容】\n" + _j.dumps(data, ensure_ascii=False, indent=1) + "\n"
+            "【输出要求】只输出一个 JSON 对象（不要代码块标记、不要解释文字）：\n"
+            '{"issues": [{"type": "逻辑矛盾/设定冲突/完整性/伏笔连贯/规则自洽/人物动机", "desc": "具体问题说明"}]}\n'
+            "若没有问题，输出 {\"issues\": []}。"
+        )
+
+    @staticmethod
+    def _fix_prompt(data: dict, issues: list) -> str:
+        """修正 prompt：按审查问题清单输出修订后的完整设定 JSON。"""
+        import json as _j
+        return (
+            "你是资深小说设定策划师。根据审查结论指出问题，修订以下前期设定。\n"
+            "【审查问题】\n" + _j.dumps(issues, ensure_ascii=False, indent=1) + "\n"
+            "【原设定】\n" + _j.dumps(data, ensure_ascii=False, indent=1) + "\n"
+            "【要求】\n"
+            "1. 保持原设定的主体结构与风格，只修正问题（增补/调整冲突处）；\n"
+            "2. 输出修订后的完整 JSON，结构必须与原设定一致（worldview/characters/outline/foreshadows/"
+            "storylines/power_levels/tech_nodes/timeline/maps 字段齐全）；\n"
+            "3. 不要输出代码块标记或解释文字。"
+        )
+
     def _show_ai_preplan_dialog(self):
         if self.storage is None:
             QMessageBox.information(self, "提示", "请先打开项目。")
@@ -1246,19 +1275,69 @@ class MainWindow(QMainWindow):
             "所有内容用中文；字符串内不要包含双引号；未勾选生成的模块对应字段给空数组/空对象。"
         )
 
-    def _ai_preplan_generate(self, p: dict, done_cb):
-        prompt = self._ai_preplan_prompt(p)
-        self.log("AI 一键前期策划中…", "info")
+    def _ai_preplan_generate(self, p: dict, progress_cb=None, done_cb=None):
+        """生成前期设定；启用审查官时迭代：生成 → 审查 → 修正 → 再审查（最多 2 轮）。"""
+        from .dialogs.ai_preplan_dialog import _parse_issues, _parse_preplan_json
 
-        def _on_ai(text, err):
+        def _progress(msg: str):
+            if progress_cb:
+                progress_cb(msg)
+
+        gen_prompt = self._ai_preplan_prompt(p)
+        review_enabled = bool(p.get("review"))
+        _progress("⏳ 步骤 1/3：AI 生成前期设定初稿…")
+        self.log("AI 一键前期策划：生成初稿中…", "info")
+
+        def _gen_done(text, err):
             if err:
                 done_cb(None, str(err))
                 return
-            from .dialogs.ai_preplan_dialog import _parse_preplan_json
             data = _parse_preplan_json(text or "")
-            done_cb(data, None if data else "AI 输出不是有效的 JSON")
+            if data is None:
+                done_cb(None, "AI 输出不是有效的 JSON")
+                return
+            if not review_enabled:
+                _progress("✅ 步骤 1/2：初稿已生成")
+                done_cb(data, None)
+                return
+            _review_round(1, data)
 
-        self.ai_panel.run_task(prompt, _on_ai, stream=False)
+        def _review_round(round_no: int, data: dict):
+            _progress(f"🔍 步骤 2/3：审查官第 {round_no} 轮 审查设定合理性…")
+            self.log(f"AI 前期策划：审查官第 {round_no} 轮 审查中…", "info")
+            self.ai_panel.run_task(self._review_prompt(data), lambda t, e, _r=round_no, _d=data: _review_done(t, e, _r, _d), stream=False)
+
+        def _review_done(text, err, round_no, data):
+            if err:
+                done_cb(None, f"审查失败：{err}")
+                return
+            issues = _parse_issues(text or "")
+            if issues:
+                _progress(f"🔍 第 {round_no} 轮发现 {len(issues)} 个问题，正在修正…")
+                self.log(f"AI 前期策划：发现 {len(issues)} 个问题，修正中…", "warn")
+                self.ai_panel.run_task(
+                    self._fix_prompt(data, issues),
+                    lambda t, e, _r=round_no: _fix_done(t, e, _r),
+                    stream=False)
+            else:
+                _progress("✅ 步骤 3/3：审查通过，设定合理")
+                done_cb(data, None)
+
+        def _fix_done(text, err, round_no):
+            if err:
+                done_cb(None, f"修正失败：{err}")
+                return
+            fixed = _parse_preplan_json(text or "")
+            if fixed is None:
+                done_cb(None, "修正结果不是有效的 JSON")
+                return
+            if round_no >= 2:
+                _progress("⚠ 达到审查迭代上限，采用最终版（可再点一次生成继续优化）")
+                done_cb(fixed, None)
+            else:
+                _review_round(round_no + 1, fixed)
+
+        self.ai_panel.run_task(gen_prompt, _gen_done, stream=False)
 
     def _ai_preplan_write(self, data: dict, progress_cb=None, done_cb=None):
         """把 AI 生成的前期设定写入项目（各规划表），逐模块上报进度。"""
