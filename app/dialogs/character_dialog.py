@@ -3833,7 +3833,7 @@ class CharacterDialog(GradientDialog):
         ("modules", "📦 自定义模块"),
     ]
 
-    def __init__(self, storage, parent=None, initial_tab: int = 2):
+    def __init__(self, storage, parent=None, initial_tab: int = 0):
         super().__init__("项目设定管理", parent, resizable=True)
         self.storage = storage
         self._initial_tab = max(0, initial_tab)

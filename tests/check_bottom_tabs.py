@@ -43,31 +43,29 @@ for name in ("light", "dark", "pink"):
     assert "{PRIMARY}" not in qss
 print("2) 底部激活 tab 高亮 QSS 保留 OK（三主题）")
 
-# 3) AI 写作助手移到底部 dock，与日志左右分布
+# 3) AI 写作助手默认在右侧 dock（用户可拖到底部，位置随记忆）
 from PySide6.QtCore import Qt
 area_ai = win.dockWidgetArea(win.ai_dock)
 area_log = win.dockWidgetArea(win.log_dock)
-assert area_ai == Qt.DockWidgetArea.BottomDockWidgetArea, area_ai
+assert area_ai == Qt.DockWidgetArea.RightDockWidgetArea, area_ai
 assert area_log == Qt.DockWidgetArea.BottomDockWidgetArea, area_log
 assert win.ai_dock.isVisible() and win.log_dock.isVisible()
-print("3) AI 面板与日志同在底部 OK（左右分布由 splitDockWidget 建立）")
+print("3) AI 面板默认右侧、日志在底部 OK（可自由拖拽）")
 
 # 4) AI 面板 提问/回答 框布局随 dock 位置自适应：底部=左右（左回答/右输入），两侧=上下
 panel = win.ai_panel
-assert panel._io_splitter.orientation() == Qt.Orientation.Horizontal, "底部应左右分布"
-assert panel._io_splitter.widget(0) is panel.out_box, "底部左侧应为 AI 回答"
-assert panel._io_splitter.widget(1) is panel.prompt_box, "底部右侧应为输入框"
-panel.set_layout_for_dock(Qt.DockWidgetArea.RightDockWidgetArea)
 assert panel._io_splitter.orientation() == Qt.Orientation.Vertical, "右侧应上下分布"
 assert panel._io_splitter.widget(0) is panel.prompt_box, "两侧上方应为输入框"
 assert panel._io_splitter.widget(1) is panel.out_box, "两侧下方应为回答框"
-panel.set_layout_for_dock(Qt.DockWidgetArea.LeftDockWidgetArea)
-assert panel._io_splitter.orientation() == Qt.Orientation.Vertical, "左侧应上下分布"
 panel.set_layout_for_dock(Qt.DockWidgetArea.BottomDockWidgetArea)
 assert panel._io_splitter.orientation() == Qt.Orientation.Horizontal, "底部应左右分布"
 assert panel._io_splitter.widget(0) is panel.out_box, "底部左侧应为 AI 回答"
 assert panel._io_splitter.widget(1) is panel.prompt_box, "底部右侧应为输入框"
-print("4) AI 提问/回答框布局自适应 OK（底部 左回答右输入 / 两侧 上输入下回答）")
+panel.set_layout_for_dock(Qt.DockWidgetArea.LeftDockWidgetArea)
+assert panel._io_splitter.orientation() == Qt.Orientation.Vertical, "左侧应上下分布"
+panel.set_layout_for_dock(Qt.DockWidgetArea.RightDockWidgetArea)
+assert panel._io_splitter.orientation() == Qt.Orientation.Vertical, "右侧应上下分布"
+print("4) AI 提问/回答框布局自适应 OK（右侧 上输入下回答 / 底部 左回答右输入）")
 
 win.close()
 print("BOTTOM TABS CLEANED OK")

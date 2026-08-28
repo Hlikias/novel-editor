@@ -222,6 +222,16 @@ class GradientDialog(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
+        # 初始尺寸：无记忆几何时按控件内容比例（sizeHint×1.15），保持控件长宽比
+        if not getattr(self, "_size_inited", False):
+            self._size_inited = True
+            try:
+                if not _load_geoms().get(self.__class__.__name__):
+                    hint = self.sizeHint()
+                    if hint.isValid() and hint.width() >= 200 and hint.height() >= 100:
+                        self.resize(int(hint.width() * 1.15), int(hint.height() * 1.15))
+            except Exception:  # noqa: BLE001
+                pass
         if getattr(self, "_alive", True) and self._fade_anim.state() != QPropertyAnimation.State.Running:
             # 第二次及以后显示不重复淡入；仅首次打开时播放
             if not getattr(self, "_faded_once", False):

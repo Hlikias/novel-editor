@@ -512,7 +512,7 @@ class MainWindow(QMainWindow):
         self._chapter_mgr_action = self._add_action(project_menu, "🗂 章节管理…", self.show_chapter_dialog, "Ctrl+Shift+C", None)
         self._add_action(project_menu, "📛 取名器…", self._show_name_dialog, None, None)
         self._add_action(project_menu, "🗑 回收站…", self._show_recycle_dialog, None, None)
-        self._add_action(project_menu, "👥 大纲 / 世界观 / 角色管理…", lambda: self.show_character_dialog(2), "Ctrl+Shift+R", None)
+        self._add_action(project_menu, "👥 大纲 / 世界观 / 角色管理…", self.show_character_dialog, "Ctrl+Shift+R", None)
         self._add_action(project_menu, "📐 创作规划（伏笔/章节卡片/体系/剧情线/时间线）", lambda: self._show_planning_dialog(True), "Ctrl+Shift+P", None)
         project_menu.addSeparator()
         self._add_action(project_menu, "📊 统计视图", self.show_stats_view, None, None)
@@ -1412,15 +1412,16 @@ class MainWindow(QMainWindow):
         self.chapter_dock.setWidget(dock_widget)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.chapter_dock)
 
-        # ---- AI 写作助手（移到底部，与日志左右分布；此处仅创建） ----
+        # ---- AI 写作助手（默认右侧；可拖到底部/两侧，位置随记忆） ----
         self.ai_dock = QDockWidget("AI 写作助手", self)
         self.ai_dock.setObjectName("ai_dock")
         self.ai_dock.setMinimumSize(220, 0)
         self.ai_panel = AIPanel(self.config)
         self.ai_panel.current_editor_provider = self.current_editor
         self.ai_dock.setWidget(self.ai_panel)
-        # AI 面板 提问/回答 布局随 dock 位置自适应（底部=左右，两侧=上下）
+        # AI 面板 提问/回答 布局随 dock 位置自适应（底部=左答右输入，两侧=上输入下回答）
         self.ai_dock.dockLocationChanged.connect(self._on_ai_dock_moved)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.ai_dock)
 
         # ---- 右侧：统计视图 ----
         self.stats_dock = QDockWidget("📊 统计", self)
@@ -1438,9 +1439,10 @@ class MainWindow(QMainWindow):
         self.notes_dock.setWidget(self.notes_view)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.notes_dock)
 
-        # 右侧两个 dock 叠成标签页：统计 / 便签（AI 已移到底部）
-        self.tabifyDockWidget(self.stats_dock, self.notes_dock)
-        self.stats_dock.raise_()
+        # 右侧 dock 叠成标签页：AI / 统计 / 便签（AI 默认激活）
+        self.tabifyDockWidget(self.ai_dock, self.stats_dock)
+        self.tabifyDockWidget(self.ai_dock, self.notes_dock)
+        self.ai_dock.raise_()
 
         # ---- 底部：日志 / 控制台 ----
         self.log_dock = QDockWidget("日志 / 控制台", self)
@@ -1514,10 +1516,6 @@ class MainWindow(QMainWindow):
         self.log_dock.setMinimumHeight(60)        # 日志区最低高度（可再拉矮）
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
 
-        # ---- 底部：AI 写作助手（与日志/搜索 dock 左右分布） ----
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.ai_dock)
-        self.splitDockWidget(self.ai_dock, self.log_dock, Qt.Orientation.Horizontal)
-
         # ---- 底部：全文搜索 ----
         self.search_dock = QDockWidget("🔍 全文搜索", self)
         self.search_dock.setObjectName("search_dock")
@@ -1571,8 +1569,8 @@ class MainWindow(QMainWindow):
         self.quote_view = QuoteDock()
         self.quote_dock.setWidget(self.quote_view)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.quote_dock)
-        self.tabifyDockWidget(self.stats_dock, self.quote_dock)
-        self.stats_dock.raise_()
+        self.tabifyDockWidget(self.ai_dock, self.quote_dock)
+        self.ai_dock.raise_()
 
         # ---- 本章速览（边写边看：卡片/伏笔/剧情线/人物） ----
         from .chapter_snap import ChapterSnapFloat, ChapterSnapPanel
@@ -1582,7 +1580,7 @@ class MainWindow(QMainWindow):
         self.snap_panel = ChapterSnapPanel()
         self.snap_dock.setWidget(self.snap_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.snap_dock)
-        self.tabifyDockWidget(self.stats_dock, self.snap_dock)
+        self.tabifyDockWidget(self.ai_dock, self.snap_dock)
         self.snap_float = ChapterSnapFloat(self)
         self.snap_dock.hide()   # 默认收起，菜单/快捷键唤出
 
@@ -1705,7 +1703,7 @@ class MainWindow(QMainWindow):
         # ── 章节与设定 ──
         add("🆕 新建章节", self.new_chapter, "🆕")
         add("🗂 章节管理…", self.show_chapter_dialog, "🗂")
-        add("👥 大纲 / 世界观 / 角色管理…", lambda: self.show_character_dialog(2), "👥")
+        add("👥 大纲 / 世界观 / 角色管理…", self.show_character_dialog, "👥")
         add("📐 创作规划…", lambda: self._show_planning_dialog(True), "📐")
         sep()
         # ── AI 写作 ──
@@ -1980,6 +1978,17 @@ class MainWindow(QMainWindow):
             return
         book = dlg.book()
         folder = dlg.folder()
+        # 防重名覆盖：目标文件夹下已有同名 .db 时拒绝创建
+        safe = Storage._safe_filename(book.title)
+        db_path = os.path.join(folder, f"{safe}.db")
+        if os.path.exists(db_path):
+            QMessageBox.warning(
+                self, "项目已存在",
+                f"该文件夹下已存在同名项目《{book.title}》\n（{os.path.basename(db_path)}）。\n\n"
+                "为避免覆盖已有项目，请更换书名或选择其它存储位置。",
+            )
+            self.log(f"创建项目失败：目标位置已有同名项目《{book.title}》", "warn")
+            return
         try:
             storage = Storage.create_project(book, folder)
         except Exception as e:  # noqa: BLE001
@@ -3561,33 +3570,38 @@ class MainWindow(QMainWindow):
         app_cfg = self.config.get("app", {})
         geo = app_cfg.get("window_geometry")
         state = app_cfg.get("window_state")
+        # 布局版本：旧版本（AI 面板曾固定底部）保存的 dock 布局不恢复，
+        # 使用新默认（AI 在右侧），下次保存时写入新版本标记
+        cur_layout = int(app_cfg.get("layout_version", 0) or 0)
         if geo:
             try:
                 self.restoreGeometry(geo.encode("latin1"))
             except Exception:  # noqa: BLE001
                 pass
-        # 换显示器 / 分辨率变小时钳制：窗口不超出可用屏幕（2K → 1K 等场景）
-        self._clamp_window_to_screen()
-        if state:
+        else:
+            # 无记忆几何时：按屏幕可用面积比例作为初始尺寸（保持控件/内容比例）
+            try:
+                scr = QApplication.primaryScreen()
+                if scr is not None:
+                    av = scr.availableGeometry()
+                    self.resize(int(av.width() * 0.72), int(av.height() * 0.78))
+            except Exception:  # noqa: BLE001
+                pass
+        if state and cur_layout >= 2:
             try:
                 self.restoreState(state.encode("latin1"))
             except Exception:  # noqa: BLE001
                 pass
-        # AI 写作助手固定放底部、与日志左右分布（新布局；旧版保存的右侧位置一律纠正）
-        if hasattr(self, "ai_dock") and hasattr(self, "log_dock"):
+        if cur_layout < 2:
+            # 旧布局升级：写入新版本标记（dock 布局按当前默认：AI 在右侧）
+            app_cfg["layout_version"] = 2
             try:
-                bottom = Qt.DockWidgetArea.BottomDockWidgetArea
-                if self.dockWidgetArea(self.log_dock) != bottom:
-                    self.removeDockWidget(self.log_dock)
-                    self.addDockWidget(bottom, self.log_dock)
-                if self.dockWidgetArea(self.ai_dock) != bottom:
-                    self.removeDockWidget(self.ai_dock)
-                    self.addDockWidget(bottom, self.ai_dock)
-                self.splitDockWidget(self.ai_dock, self.log_dock, Qt.Orientation.Horizontal)
-                self.ai_dock.show()
+                save_config(self.config)
             except Exception:  # noqa: BLE001
                 pass
-        # 初始按 dock 位置设置 AI 面板 提问/回答 布局
+        # 换显示器 / 分辨率变小时钳制：窗口不超出可用屏幕（2K → 1K 等场景）
+        self._clamp_window_to_screen()
+        # AI 面板布局随 dock 位置初始化（默认右侧=上下，拖到底部=左右）
         if hasattr(self, "ai_panel"):
             try:
                 self.ai_panel.set_layout_for_dock(self.dockWidgetArea(self.ai_dock))
