@@ -465,7 +465,8 @@ class MainWindow(QMainWindow):
         self._add_action(file_menu, "导出当前章节为文本…", self.export_current_chapter, None, "SP_DialogSaveButton")
         self._add_action(file_menu, "导出全部章节…", self.export_all_chapters, None, None)
         self._add_action(file_menu, "📄 导出为 Word（格式设置）…", self.export_current_docx, None, None)
-        self._add_action(file_menu, "🎬 导出漫剧脚本…", self.export_current_manju, None, None)
+        self._add_action(file_menu, "🎬 导出漫剧脚本（AI 生成）…", self.show_ai_manju_dialog, None, None)
+        self._add_action(file_menu, "📜 漫剧脚本（规则版）…", self.export_current_manju_rule, None, None)
         self._add_action(file_menu, "📄 导出为 PDF…", self.export_current_pdf, None, None)
         self._add_action(file_menu, "🖨 打印当前文章…", self.print_current_chapter, "Ctrl+P", None)
         self._add_action(file_menu, "📋 按范本导出（AI）…", self._show_template_export_dialog, None, None)
@@ -3085,15 +3086,15 @@ class MainWindow(QMainWindow):
 
     # ---------- PDF 导出 / 打印 ----------
     # ---------- 漫剧脚本导出 ----------
-    def export_current_manju(self):
-        """导出当前文章为漫剧分镜脚本（漫剧生成软件可用）。"""
+    def export_current_manju_rule(self):
+        """导出当前文章为漫剧分镜脚本（规则版：正则抽取说话人/旁白，无 AI）。"""
         editor = self.current_editor()
         if editor is None:
             QMessageBox.information(self, "提示", "没有打开的文章。")
             return
         ch_title = self._current_ch_title()
         path, _ = QFileDialog.getSaveFileName(
-            self, "导出漫剧脚本",
+            self, "导出漫剧脚本（规则版）",
             os.path.join(os.path.expanduser("~"), f"{ch_title or '文章'}-漫剧脚本.txt"),
             "文本文件 (*.txt)",
         )
@@ -3106,6 +3107,180 @@ class MainWindow(QMainWindow):
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "导出失败", f"{e}")
             self.log(f"导出失败: {e}", "error")
+
+    def show_ai_manju_dialog(self):
+        """打开 AI 漫剧分镜导出弹窗；AI 被隐私禁用时询问是否改用规则版。"""
+        editor = self.current_editor()
+        if editor is None:
+            QMessageBox.information(self, "提示", "没有打开的文章。")
+            return
+        blocked = self.ai_panel._privacy_blocked()
+        if blocked:
+            ret = QMessageBox.question(
+                self, "AI 漫剧导出",
+                blocked + "\n\n是否改用「规则版」导出？（不调用 AI，直接在当前项目生成）",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            if ret == QMessageBox.Yes:
+                self.export_current_manju_rule()
+            return
+        if not hasattr(self, "_ai_manju_dialog") or self._ai_manju_dialog is None:
+            from .dialogs.ai_manju_dialog import AIManjuDialog
+            self._ai_manju_dialog = AIManjuDialog(
+                self,
+                on_generate=self._ai_manju_generate,
+                on_export=self._ai_manju_export,
+                default_title=self._current_ch_title(),
+            )
+        self._ai_manju_dialog.show()
+        self._ai_manju_dialog.raise_()
+        self._ai_manju_dialog.activateWindow()
+
+    @staticmethod
+    def _ai_manju_prompt(p: dict, text: str, title: str) -> str:
+        density_label = ["紧凑", "标准", "详尽"][p.get("density", 1)]
+        return (
+            "你是一位资深漫剧（动态漫画）分镜师。请把下面的小说章节改编成" + density_label
+            + f"漫剧分镜脚本，用于漫剧生成软件（每个镜头可独立生成画面）。\n"
+            f"【漫剧风格】{p['style']}\n"
+            f"【画幅】{p['ratio']}\n"
+            f"【镜头数】约 {p['density_target']} 个镜头，覆盖本章完整情节。\n"
+            + (f"【角色画面设定（保持各镜头画面一致，必须遵守）】\n{p['characters']}\n" if p.get("characters") else "")
+            + (f"【附加要求】\n{p['extra']}\n" if p.get("extra") else "")
+            + f"【章节标题】{title or '（无标题）'}\n"
+            "【章节正文】\n" + (text or "（正文为空，请提示）") + "\n"
+            "【输出要求】只输出一个 JSON 数组（不要 markdown 代码块标记、不要任何解释文字），每个元素一个镜头：\n"
+            '[\n  {"scene":"画面描述（可直接用于 AI 生图的提示词，含景别/人物动作/表情/环境/氛围/光线）",'
+            '"dialog":"该镜头台词（说话人：台词，无则空字符串）","narration":"旁白（无则空字符串）"}\n]\n'
+            "要求：台词必须来自原文（说话人：台词），画面要能支撑台词；镜头顺序连贯、推进情节；"
+            "画面描述用中文、含明确的构图要素；不要输出镜头编号字段。"
+        )
+
+    @staticmethod
+    def _manju_review_prompt(shots: list, p: dict) -> str:
+        import json as _j
+        return (
+            "你是漫剧分镜审查官。审查以下 AI 生成的分镜脚本，指出必须修正的问题。\n"
+            "【审查维度】\n"
+            "1. 画面可否用于 AI 生图：scene 是否含清晰构图/人物动作/环境/光线，缺要素的镜头要补全；\n"
+            "2. 台词与画面匹配：台词说话人是否与画面人物一致；\n"
+            "3. 镜头连贯：相邻镜头间动作/场景/情绪是否断裂或跳变；\n"
+            "4. 角色一致性：同一角色在不同镜头的外貌/服装/标志物是否冲突（结合用户角色画面设定）；\n"
+            "5. 关键情节覆盖：是否漏掉原文重要情节或结局。\n"
+            "【分镜】\n" + _j.dumps(shots, ensure_ascii=False, indent=1) + "\n"
+            "【输出要求】若无问题输出 {\"issues\":[]}；有问题输出 {\"issues\":[{\"type\":\"类别\","
+            "\"desc\":\"具体问题+对应镜头序号\"}]}，只输出这个 JSON，不要解释文字。"
+        )
+
+    @staticmethod
+    def _manju_fix_prompt(shots: list, issues: list) -> str:
+        import json as _j
+        return (
+            "你是资深漫剧分镜师。根据审查结论指出问题，修订以下分镜脚本。\n"
+            "【审查问题】\n" + _j.dumps(issues, ensure_ascii=False, indent=1) + "\n"
+            "【原分镜】\n" + _j.dumps(shots, ensure_ascii=False, indent=1) + "\n"
+            "【要求】\n"
+            "1. 保持原有镜头总数与顺序，只修正问题（补全 scene 要素/调整台词画面匹配/衔接过渡/统一角色设定/补漏情节）；\n"
+            "2. 输出修订后的完整 JSON 数组，结构必须与原来一致（每镜头 scene/dialog/narration）；\n"
+            "3. 不要输出代码块标记或解释文字。"
+        )
+
+    def _ai_manju_generate(self, p: dict, progress_cb=None, done_cb=None):
+        """AI 生成漫剧分镜；启用审查官时迭代：生成 → 审查 → 修正 → 再审查（最多 2 轮）。"""
+        from .dialogs.ai_manju_dialog import _parse_shots
+        from .dialogs.ai_preplan_dialog import _parse_issues
+
+        editor = self.current_editor()
+        if editor is None:
+            if done_cb:
+                done_cb(None, "没有打开的文章")
+            return
+        text = editor.content()
+        title = self._current_ch_title()
+        review_enabled = bool(p.get("review"))
+
+        def _progress(msg: str):
+            if progress_cb:
+                progress_cb(msg)
+
+        _progress("⏳ 步骤 1/3：AI 正在生成漫剧分镜…")
+        self.log("AI 漫剧分镜：生成初稿中…", "info")
+
+        def _gen_done(resp, err):
+            if err:
+                done_cb(None, str(err))
+                return
+            shots = _parse_shots(resp or "")
+            if shots is None:
+                done_cb(None, "AI 输出不是有效的分镜 JSON")
+                return
+            if not review_enabled:
+                _progress("✅ 步骤 1/2：分镜已生成")
+                done_cb(shots, None)
+                return
+            _review_round(1, shots)
+
+        def _review_round(round_no: int, shots: list):
+            _progress(f"🔍 步骤 2/3：审查官第 {round_no} 轮 审查分镜质量…")
+            self.log(f"AI 漫剧分镜：审查官第 {round_no} 轮 审查中…", "info")
+            self.ai_panel.run_task(
+                self._manju_review_prompt(shots, p),
+                lambda t, e, _r=round_no, _s=shots: _review_done(t, e, _r, _s),
+                stream=False)
+
+        def _review_done(resp, err, round_no, shots):
+            if err:
+                done_cb(None, f"审查失败：{err}")
+                return
+            issues = _parse_issues(resp or "")
+            if issues:
+                _progress(f"🔍 第 {round_no} 轮发现 {len(issues)} 个问题，正在修正…")
+                self.log(f"AI 漫剧分镜：发现 {len(issues)} 个问题，修正中…", "warn")
+                self.ai_panel.run_task(
+                    self._manju_fix_prompt(shots, issues),
+                    lambda t, e, _r=round_no: _fix_done(t, e, _r),
+                    stream=False)
+            else:
+                _progress("✅ 步骤 3/3：审查通过，分镜质量合格")
+                done_cb(shots, None)
+
+        def _fix_done(resp, err, round_no):
+            if err:
+                done_cb(None, f"修正失败：{err}")
+                return
+            fixed = _parse_shots(resp or "")
+            if fixed is None:
+                done_cb(None, "修正结果不是有效的分镜 JSON")
+                return
+            if round_no >= 2:
+                _progress("⚠ 达到审查迭代上限，采用最终版（可再点一次生成继续优化）")
+                done_cb(fixed, None)
+            else:
+                _review_round(round_no + 1, fixed)
+
+        self.ai_panel.run_task(self._ai_manju_prompt(p, text, title), _gen_done, stream=False)
+
+    def _ai_manju_export(self, text: str, done_cb=None):
+        """把 AI 分镜文本保存为 txt。"""
+        try:
+            ch_title = self._current_ch_title()
+            path, _ = QFileDialog.getSaveFileName(
+                self, "导出漫剧分镜脚本",
+                os.path.join(os.path.expanduser("~"), f"{ch_title or '文章'}-漫剧分镜-AI.txt"),
+                "文本文件 (*.txt)",
+            )
+            if not path:
+                if done_cb:
+                    done_cb("")   # 用户取消
+                return
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            self.log(f"已导出 AI 漫剧分镜: {path}", "ok")
+            if done_cb:
+                done_cb(None)
+        except Exception as e:  # noqa: BLE001
+            self.log(f"导出失败: {e}", "error")
+            if done_cb:
+                done_cb(str(e))
 
     def export_current_pdf(self):
         """导出当前文章为 PDF（按当前记忆/默认格式渲染：标题居中、正文缩进与行距）。"""
