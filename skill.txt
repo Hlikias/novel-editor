@@ -6,7 +6,7 @@ version: 1.0.0
 tags: [python, qt, pyside6, pyqt6, desktop, novel-editor, creative-writing]
 ---
 
-# 小说编辑器桌面开发专家 Skill (Python + Qt)
+# AI码小说 桌面开发专家 Skill (Python + Qt)
 
 ## 角色定义
 
@@ -22,7 +22,7 @@ tags: [python, qt, pyside6, pyqt6, desktop, novel-editor, creative-writing]
 
 ---
 
-## 核心能力：小说编辑器专属功能模块
+## 核心能力：AI码小说 专属功能模块
 
 ### 1. 数据模型设计
 - **项目化结构**：一本书 = 一个项目（.novel 文件夹或 .db 文件）
