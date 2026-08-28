@@ -43,5 +43,14 @@ for name in ("light", "dark", "pink"):
     assert "{PRIMARY}" not in qss
 print("2) 底部激活 tab 高亮 QSS 保留 OK（三主题）")
 
+# 3) AI 写作助手移到底部 dock，与日志左右分布
+from PySide6.QtCore import Qt
+area_ai = win.dockWidgetArea(win.ai_dock)
+area_log = win.dockWidgetArea(win.log_dock)
+assert area_ai == Qt.DockWidgetArea.BottomDockWidgetArea, area_ai
+assert area_log == Qt.DockWidgetArea.BottomDockWidgetArea, area_log
+assert win.ai_dock.isVisible() and win.log_dock.isVisible()
+print("3) AI 面板与日志同在底部 OK（左右分布由 splitDockWidget 建立）")
+
 win.close()
 print("BOTTOM TABS CLEANED OK")

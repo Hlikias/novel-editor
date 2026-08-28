@@ -4,8 +4,8 @@
 - 顶栏：菜单（文件/创建/项目/视图/帮助）+ 最小化/最大化/关闭
 - 工具栏：常用操作
 - 左侧 dock：章节列表（点击切换）
-- 右侧 dock：AI 写作辅助面板
-- 底部 dock：日志 / 控制台
+- 右侧 dock：统计 / 便签 / 设定查询等（标签页叠放）
+- 底部 dock：AI 写作助手与日志 / 控制台 左右分布
 - 中心区：VSCode 式多标签编辑器
 - 状态栏：项目名 / 光标位置 / 字数 / 编码 / 保存状态
 """
@@ -1411,14 +1411,13 @@ class MainWindow(QMainWindow):
         self.chapter_dock.setWidget(dock_widget)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.chapter_dock)
 
-        # ---- 右侧：AI 面板 ----
+        # ---- AI 写作助手（移到底部，与日志左右分布；此处仅创建） ----
         self.ai_dock = QDockWidget("AI 写作助手", self)
         self.ai_dock.setObjectName("ai_dock")
-        self.ai_dock.setMinimumSize(160, 0)   # 右侧 dock 可拉得更窄
+        self.ai_dock.setMinimumSize(220, 0)
         self.ai_panel = AIPanel(self.config)
         self.ai_panel.current_editor_provider = self.current_editor
         self.ai_dock.setWidget(self.ai_panel)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.ai_dock)
 
         # ---- 右侧：统计视图 ----
         self.stats_dock = QDockWidget("📊 统计", self)
@@ -1436,10 +1435,9 @@ class MainWindow(QMainWindow):
         self.notes_dock.setWidget(self.notes_view)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.notes_dock)
 
-        # 右侧三个 dock 叠成标签页：AI / 统计 / 便签
-        self.tabifyDockWidget(self.ai_dock, self.stats_dock)
-        self.tabifyDockWidget(self.ai_dock, self.notes_dock)
-        self.ai_dock.raise_()
+        # 右侧两个 dock 叠成标签页：统计 / 便签（AI 已移到底部）
+        self.tabifyDockWidget(self.stats_dock, self.notes_dock)
+        self.stats_dock.raise_()
 
         # ---- 底部：日志 / 控制台 ----
         self.log_dock = QDockWidget("日志 / 控制台", self)
@@ -1513,6 +1511,10 @@ class MainWindow(QMainWindow):
         self.log_dock.setMinimumHeight(60)        # 日志区最低高度（可再拉矮）
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
 
+        # ---- 底部：AI 写作助手（与日志/搜索 dock 左右分布） ----
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.ai_dock)
+        self.splitDockWidget(self.ai_dock, self.log_dock, Qt.Orientation.Horizontal)
+
         # ---- 底部：全文搜索 ----
         self.search_dock = QDockWidget("🔍 全文搜索", self)
         self.search_dock.setObjectName("search_dock")
@@ -1566,8 +1568,8 @@ class MainWindow(QMainWindow):
         self.quote_view = QuoteDock()
         self.quote_dock.setWidget(self.quote_view)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.quote_dock)
-        self.tabifyDockWidget(self.ai_dock, self.quote_dock)
-        self.ai_dock.raise_()
+        self.tabifyDockWidget(self.stats_dock, self.quote_dock)
+        self.stats_dock.raise_()
 
         # ---- 本章速览（边写边看：卡片/伏笔/剧情线/人物） ----
         from .chapter_snap import ChapterSnapFloat, ChapterSnapPanel
@@ -1577,7 +1579,7 @@ class MainWindow(QMainWindow):
         self.snap_panel = ChapterSnapPanel()
         self.snap_dock.setWidget(self.snap_panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.snap_dock)
-        self.tabifyDockWidget(self.ai_dock, self.snap_dock)
+        self.tabifyDockWidget(self.stats_dock, self.snap_dock)
         self.snap_float = ChapterSnapFloat(self)
         self.snap_dock.hide()   # 默认收起，菜单/快捷键唤出
 
@@ -3536,6 +3538,20 @@ class MainWindow(QMainWindow):
         if state:
             try:
                 self.restoreState(state.encode("latin1"))
+            except Exception:  # noqa: BLE001
+                pass
+        # AI 写作助手固定放底部、与日志左右分布（新布局；旧版保存的右侧位置一律纠正）
+        if hasattr(self, "ai_dock") and hasattr(self, "log_dock"):
+            try:
+                bottom = Qt.DockWidgetArea.BottomDockWidgetArea
+                if self.dockWidgetArea(self.log_dock) != bottom:
+                    self.removeDockWidget(self.log_dock)
+                    self.addDockWidget(bottom, self.log_dock)
+                if self.dockWidgetArea(self.ai_dock) != bottom:
+                    self.removeDockWidget(self.ai_dock)
+                    self.addDockWidget(bottom, self.ai_dock)
+                self.splitDockWidget(self.ai_dock, self.log_dock, Qt.Orientation.Horizontal)
+                self.ai_dock.show()
             except Exception:  # noqa: BLE001
                 pass
 
