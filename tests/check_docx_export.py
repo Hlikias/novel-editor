@@ -175,7 +175,21 @@ check("手动格式正文字体", mf.body_font in FONTS)
 check("手动格式缩进 2 字符", mf.first_indent_chars == 2.0)
 td.tpl_radio.setChecked(True)
 check("范本模式未选范本 fmt=None", td.current_fmt() is None)
+
+# 单选钮互斥修复：来源与模式分属不同组，模式可正常点选
+check("默认范本模式选中", td.tpl_radio.isChecked())
+td.mode_radios[1][1].setChecked(True)
+check("模式单选钮可点选（互斥修复）", td.mode_radios[1][1].isChecked())
+check("点模式不影响来源", td.tpl_radio.isChecked())
+td.manual_radio.setChecked(True)
+check("切来源后模式保持选中", td.mode_radios[1][1].isChecked())
+check("参考范本勾选初始禁用", not td.tpl_ref_check.isEnabled())
 td.deleteLater()
+
+# 范本文本提取（供 AI 参考）
+from app.docx_export import extract_template_text
+txt = extract_template_text(tpl)
+check("范本文本提取非空", len(txt.strip()) > 0 and "范本标题" in txt)
 
 # 打印：patch QPrintDialog.exec → 取消，流程不崩
 from PySide6.QtPrintSupport import QPrintDialog

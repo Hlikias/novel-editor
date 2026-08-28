@@ -34,19 +34,22 @@ class TemplateExportDialog(GradientDialog):
         super().__init__("📋 按范本导出（AI）", parent)
         self.on_export = on_export
         self.fmt: DocFormat | None = None
-        self.setMinimumSize(640, 700)
+        self.tpl_text: str = ""
+        self.setMinimumSize(640, 720)
 
         body = self.body
 
-        # ---- 格式来源 ----
-        src_row = QHBoxLayout()
+        # ---- 格式来源（独立容器，避免与模式单选钮互斥） ----
+        src_widget = QWidget()
+        src_row = QHBoxLayout(src_widget)
+        src_row.setContentsMargins(0, 0, 0, 0)
         self.tpl_radio = QRadioButton("📄 使用范本文件（.doc/.docx）")
         self.manual_radio = QRadioButton("🎛 手动设置格式（无范本，适合小说等）")
         self.tpl_radio.setChecked(True)
         src_row.addWidget(self.tpl_radio)
         src_row.addWidget(self.manual_radio)
         src_row.addStretch(1)
-        body.addLayout(src_row)
+        body.addWidget(src_widget)
         self.tpl_radio.toggled.connect(self._sync_source)
 
         # ---- 范本区 ----
@@ -104,13 +107,26 @@ class TemplateExportDialog(GradientDialog):
         body.addWidget(self.manual_widget)
         self._sync_source()
 
-        # ---- 模式 ----
+        # ---- 模式（独立容器，避免与来源单选钮互斥） ----
+        mode_widget = QWidget()
+        mode_lay = QVBoxLayout(mode_widget)
+        mode_lay.setContentsMargins(0, 0, 0, 0)
+        mode_lay.setSpacing(2)
         self.mode_radios: list[tuple[str, QRadioButton]] = []
         for key, label in MODES:
             rb = QRadioButton(label)
             self.mode_radios.append((key, rb))
-            body.addWidget(rb)
+            mode_lay.addWidget(rb)
         self.mode_radios[0][1].setChecked(True)
+        body.addWidget(mode_widget)
+
+        # ---- 参考范本内容（AI 参考范本全文的风格/结构） ----
+        self.tpl_ref_check = QCheckBox(
+            "📎 让 AI 参考范本的内容风格（把范本文本发给 AI，模仿其结构与语气；仅范本模式有效）"
+        )
+        self.tpl_ref_check.setChecked(True)
+        self.tpl_ref_check.setEnabled(False)   # 未选范本时不可用
+        body.addWidget(self.tpl_ref_check)
 
         # ---- 内容/要求 ----
         self.input_edit = QPlainTextEdit()
@@ -168,13 +184,19 @@ class TemplateExportDialog(GradientDialog):
             return
         self.tpl_edit.setText(path)
         try:
+            from ..docx_export import extract_template_text
             self.fmt = parse_template(path)
+            self.tpl_text = extract_template_text(path)
+            self.tpl_ref_check.setEnabled(True)
             self.tpl_status.setText(
-                f"✅ 已解析范本格式：\n{self.fmt.describe()}"
+                f"✅ 已解析范本格式：\n{self.fmt.describe()}\n"
+                f"（范本文本 {len(self.tpl_text)} 字可作 AI 参考）"
             )
             self.status.setText("范本已就绪")
         except Exception as e:  # noqa: BLE001
             self.fmt = None
+            self.tpl_text = ""
+            self.tpl_ref_check.setEnabled(False)
             self.tpl_status.setText(f"❌ 解析范本失败：{e}")
             self.status.setText("")
 
@@ -220,13 +242,17 @@ class TemplateExportDialog(GradientDialog):
         if self.on_export is None:
             self.status.setText("❌ 导出回调未注入")
             return
+        # 范本参考文本：仅范本模式且勾选参考时传
+        tpl_text = ""
+        if self.tpl_radio.isChecked() and self.tpl_ref_check.isChecked():
+            tpl_text = getattr(self, "tpl_text", "") or ""
         mode = self.mode()
         kind = self.export_kind()
         self._busy = True
         self.export_btn.setEnabled(False)
         self.status.setText("⏳ 处理中…")
         self.on_export(mode, text, fmt, self.words_spin.value(),
-                       self.extra_edit.text().strip(), kind, self._done)
+                       self.extra_edit.text().strip(), kind, tpl_text, self._done)
 
     def _done(self, err: str | None):
         self._busy = False
