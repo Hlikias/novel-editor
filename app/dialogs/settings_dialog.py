@@ -259,9 +259,35 @@ class SettingsDialog(GradientDialog):
             form.addRow("", row_w)
             return cb, le
 
-        self.global_skill_check, self.skill_text_edit = _param_row(
-            api_form, "global_skill", "技能指令", old_ctx,
-            "如：你是一位散文家，写作注重意境与语言美感…")
+        # 技能指令：多行 TextEdit + 支持导入 txt/md 文件
+        self.global_skill_check = QCheckBox("技能指令")
+        self.global_skill_check.setChecked(bool(ai_cfg.get("global_skill", old_ctx)))
+        self.skill_text_edit = QPlainTextEdit(ai_cfg.get("skill_text", ""))
+        self.skill_text_edit.setFixedHeight(76)
+        self.skill_text_edit.setPlaceholderText(
+            "如：你是一位散文家，写作注重意境与语言美感…（可多行，支持从 txt / md 文件导入）"
+        )
+        skill_import_btn = QPushButton("📂 导入 txt/md…")
+        skill_import_btn.clicked.connect(self._import_skill_text)
+        skill_sw = QWidget()
+        skill_sl = QVBoxLayout(skill_sw)
+        skill_sl.setContentsMargins(0, 0, 0, 0)
+        skill_sl.setSpacing(2)
+        skill_sl.addWidget(self.skill_text_edit)
+        skill_br = QHBoxLayout()
+        skill_br.addStretch(1)
+        skill_br.addWidget(skill_import_btn)
+        skill_sl.addLayout(skill_br)
+        skill_row_w = QWidget()
+        skill_rl = QHBoxLayout(skill_row_w)
+        skill_rl.setContentsMargins(0, 0, 0, 0)
+        skill_rl.addWidget(self.global_skill_check)
+        skill_rl.addWidget(skill_sw, 1)
+        api_form.addRow("", skill_row_w)
+
+        self.global_identity_check, self.identity_text_edit = _param_row(
+            api_form, "global_identity", "身份", old_ctx,
+            "如：作者笔名 惊鸿，中文系在读，擅长叙事…")
         self.global_identity_check, self.identity_text_edit = _param_row(
             api_form, "global_identity", "身份", old_ctx,
             "如：作者笔名 惊鸿，中文系在读，擅长叙事…")
@@ -681,6 +707,28 @@ class SettingsDialog(GradientDialog):
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(self, "导入失败", f"无法解析技能文件：\n{e}")
 
+    def _import_skill_text(self):
+        """从 .txt / .md 文件导入技能指令文本（utf-8 优先，GBK 兜底）。"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "导入技能指令", os.path.expanduser("~"),
+            "文本 / Markdown (*.txt *.md);;所有文件 (*)",
+        )
+        if not path:
+            return
+        text = None
+        for enc in ("utf-8", "gbk"):
+            try:
+                with open(path, "r", encoding=enc) as f:
+                    text = f.read()
+                break
+            except UnicodeDecodeError:
+                continue
+        if text is None:
+            QMessageBox.warning(self, "导入失败", "无法读取文件（编码不支持）")
+            return
+        self.skill_text_edit.setPlainText(text.strip())
+        self.global_skill_check.setChecked(True)
+
     def _save(self):
         api = self.config.setdefault("api", {})
         api["base_url"] = self.base_url_edit.text().strip()
@@ -726,10 +774,10 @@ class SettingsDialog(GradientDialog):
         privacy["ai_enabled"] = self.ai_net_check.isChecked()
         privacy["network_quotes"] = self.quote_net_check.isChecked()
 
-        # 全局 AI 参数（checkbox+lineedit，选中项作为参数注入）
+        # 全局 AI 参数（checkbox+lineedit/TextEdit，选中项作为参数注入）
         self.config.setdefault("ai", {}).update({
             "global_skill": self.global_skill_check.isChecked(),
-            "skill_text": self.skill_text_edit.text().strip(),
+            "skill_text": self.skill_text_edit.toPlainText().strip(),
             "global_identity": self.global_identity_check.isChecked(),
             "identity_text": self.identity_text_edit.text().strip(),
             "global_works": self.global_works_check.isChecked(),

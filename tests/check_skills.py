@@ -71,6 +71,22 @@ dlg._save()
 check("保存后 config 含技能", isinstance(cfg.get("skills"), list) and len(cfg["skills"]) == 1)
 check("config 技能名正确", cfg["skills"][0]["name"] == "悬疑风")
 
+# 技能指令多行 TextEdit + 导入 txt/md
+import tempfile as _tf
+skill_txt = os.path.join(d, "skill_instr.md")
+open(skill_txt, "w", encoding="utf-8").write("# 散文家指令\n你是一位散文家，\n注重意境。")
+dlg5 = SettingsDialog({"api": {}, "app": {}, "editor": {}, "privacy": {"strict": True}, "ai": {}})
+QFileDialog.getOpenFileName = staticmethod(lambda *a, **k: (skill_txt, "md"))
+try:
+    dlg5._import_skill_text()
+finally:
+    QFileDialog.getOpenFileName = old_get
+check("导入 md 填充技能指令", "# 散文家指令" in dlg5.skill_text_edit.toPlainText() and "注重意境" in dlg5.skill_text_edit.toPlainText())
+check("导入后自动勾选技能", dlg5.global_skill_check.isChecked())
+dlg5._save()
+check("保存多行技能指令", isinstance(dlg5.config["ai"].get("skill_text"), str)
+      and "注重意境" in dlg5.config["ai"]["skill_text"])
+
 # ---------- 2) 身份隐私确认 ----------
 cfg2 = {"api": {}, "app": {}, "editor": {}, "privacy": {"strict": True}, "identity": {}}
 dlg2 = SettingsDialog(cfg2)
