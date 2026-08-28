@@ -7,7 +7,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
+    QPlainTextEdit, QPushButton, QScrollArea, QSplitter, QVBoxLayout, QWidget,
 )
 
 from ..dialog_base import GradientDialog
@@ -85,9 +85,16 @@ class AIPreplanDialog(GradientDialog):
         self.on_generate = on_generate
         self.on_write = on_write
         self._data: dict | None = None
-        self.setMinimumSize(640, 640)
+        self.setMinimumSize(1000, 620)
 
         body = self.body
+        # 横向布局：左=参数区，右=生成结果
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        left = QWidget()
+        lv = QVBoxLayout(left)
+        lv.setContentsMargins(0, 0, 0, 0)
+
         form = QFormLayout()
         form.setLabelAlignment(form.labelAlignment())
 
@@ -120,10 +127,10 @@ class AIPreplanDialog(GradientDialog):
         self.conflict_edit = QLineEdit()
         self.conflict_edit.setPlaceholderText("核心冲突 / 主题（可选）：正义与欲望、家族复仇…")
         form.addRow("核心冲突", self.conflict_edit)
-        body.addLayout(form)
+        lv.addLayout(form)
 
         # 生成模块：一个一行，checkbox + 多行 TextEdit（可详细描述要求）
-        body.addWidget(QLabel("生成模块（勾选 + 详细描述要求，描述越具体生成越贴合）"))
+        lv.addWidget(QLabel("生成模块（勾选 + 详细描述要求，描述越具体生成越贴合）"))
         mod_grid = QVBoxLayout()
         self.module_checks: dict[str, QCheckBox] = {}
         self.module_specs: dict[str, QPlainTextEdit] = {}
@@ -142,7 +149,7 @@ class AIPreplanDialog(GradientDialog):
             self.module_checks[key] = cb
             self.module_specs[key] = te
             mod_grid.addWidget(row)
-        body.addLayout(mod_grid)
+        lv.addLayout(mod_grid)
 
         # 按钮
         btn_row = QHBoxLayout()
@@ -156,17 +163,33 @@ class AIPreplanDialog(GradientDialog):
         self.write_btn.setEnabled(False)
         self.status = QLabel("")
         self.status.setObjectName("mutedLabel")
+        self.status.setWordWrap(True)
         btn_row.addWidget(self.review_check)
         btn_row.addWidget(self.gen_btn)
         btn_row.addWidget(self.write_btn)
-        btn_row.addWidget(self.status)
         btn_row.addStretch(1)
-        body.addLayout(btn_row)
+        lv.addLayout(btn_row)
+        lv.addStretch(1)
 
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        left_scroll.setWidget(left)
+        splitter.addWidget(left_scroll)
+
+        # 右：生成结果
+        right = QWidget()
+        rv = QVBoxLayout(right)
+        rv.setContentsMargins(8, 0, 0, 0)
+        rv.addWidget(QLabel("📄 生成结果预览（右栏，可滚动）"))
         self.result_edit = QPlainTextEdit()
         self.result_edit.setReadOnly(True)
-        self.result_edit.setPlaceholderText("AI 生成的前期设定会显示在这里，确认无误后点「写入项目」。")
-        body.addWidget(self.result_edit, 1)
+        self.result_edit.setPlaceholderText("AI 生成的前期设定会显示在这里（右栏），确认无误后点「写入项目」。")
+        rv.addWidget(self.result_edit, 1)
+        splitter.addWidget(right)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 4)
+        body.addWidget(splitter, 1)
 
         self._busy = False
 
