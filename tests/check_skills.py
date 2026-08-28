@@ -118,11 +118,20 @@ sp2 = panel._build_system_prompt()
 check("无技能时无技能指令", "散文家指令" not in sp2)
 check("无技能时仍有身份", "作者身份" in sp2)
 
-# 全局开关关闭 → 不注入技能/身份
-panel.config.setdefault("ai", {})["global_context"] = False
+# 子开关：技能/身份各自独立
+idx = panel.skill_combo.findText("散文家")
+panel.skill_combo.setCurrentIndex(idx)   # 选中技能
+panel.config.setdefault("ai", {})
+panel.config["ai"]["global_skill"] = False
 sp3 = panel._build_system_prompt()
-check("关闭全局参考后无技能身份", "散文家指令" not in sp3 and "作者身份" not in sp3)
-panel.config["ai"]["global_context"] = True
+check("关闭技能注入后无技能", "散文家指令" not in sp3)
+check("关闭技能注入后身份仍在", "作者身份" in sp3)
+panel.config["ai"]["global_skill"] = True
+panel.config["ai"]["global_identity"] = False
+sp4 = panel._build_system_prompt()
+check("关闭身份注入后无身份", "作者身份" not in sp4 and "惊鸿" not in sp4)
+check("关闭身份注入后技能仍在", "散文家指令" in sp4)
+panel.config["ai"]["global_identity"] = True
 
 # ---------- 对话记忆 ----------
 check("初始无记忆", panel._history == [] and panel._mem_label.text() == "")
@@ -152,6 +161,13 @@ ap.AICallWorker = orig_worker
 # 清空对话 → 记忆清空
 panel._clear()
 check("清空对话后记忆为空", panel._history == [] and panel._mem_label.text() == "")
+
+# 记忆开关关闭 → 不追加记忆
+panel.config.setdefault("ai", {})["memory_enabled"] = False
+panel._last_user_prompt = "关闭记忆的提问"
+panel._on_ok("回答")
+check("关闭记忆后不追加历史", panel._history == [])
+panel.config["ai"]["memory_enabled"] = True
 
 # AICallWorker 多轮 messages 结构
 captured = {}

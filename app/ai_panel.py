@@ -271,15 +271,18 @@ class AIPanel(QWidget):
         return data if isinstance(data, dict) else None
 
     def _build_system_prompt(self) -> str:
-        """组合系统提示：默认 system_prompt + 全局参考（技能指令 + 作者身份）。
+        """组合系统提示：默认 system_prompt + 技能指令 + 作者身份。
 
-        全局参考由 config["ai"]["global_context"] 控制（默认开启）：
-        开启时所有 AI 调用（AI 面板发送与各 run_task 任务）都注入技能与身份。"""
+        技能/身份各自独立开关（config["ai"]["global_skill"] / ["global_identity"]，
+        默认开；兼容旧版单一开关 global_context）。开启时所有 AI 调用都注入。"""
         parts = [self.config.get("api", {}).get("system_prompt", "") or ""]
-        if self.config.get("ai", {}).get("global_context", True):
+        ai_cfg = self.config.get("ai", {})
+        old_ctx = ai_cfg.get("global_context", True)
+        if ai_cfg.get("global_skill", old_ctx):
             skill = self._selected_skill()
             if skill and (skill.get("system_prompt") or "").strip():
                 parts.append(skill["system_prompt"].strip())
+        if ai_cfg.get("global_identity", old_ctx):
             ident = self.config.get("identity") or {}
             if any(str(v).strip() for v in ident.values()):
                 labels = {"pen_name": "笔名", "bio": "简介", "preferences": "写作偏好",
@@ -336,12 +339,14 @@ class AIPanel(QWidget):
         self.send_btn.setEnabled(False)
         self.output_edit.clear()
         self._last_user_prompt = prompt
-        self._trim_history()
+        memory_on = self.config.get("ai", {}).get("memory_enabled", True)
+        if memory_on:
+            self._trim_history()
         self._worker = AICallWorker(
             base_url, api_key, model,
             float(api_cfg.get("temperature", 0.7)),
             self._build_system_prompt(), prompt,
-            history=list(self._history),
+            history=list(self._history) if memory_on else [],
             stream=self.stream_check.isChecked(),
             parent=self,
         )
@@ -440,13 +445,14 @@ class AIPanel(QWidget):
         # 非流式模式：完整结果在此一次性返回，需显示出来
         if text:
             self.output_edit.setPlainText(text)
-        # 对话记忆：把本轮 提问/回答 追加进历史（供下一轮参考）
-        user_prompt = getattr(self, "_last_user_prompt", "") or ""
-        if user_prompt:
-            self._history.append({"role": "user", "content": user_prompt})
-            self._history.append({"role": "assistant", "content": text or ""})
-            self._trim_history()
-            self._refresh_mem_label()
+        # 对话记忆：开启时把本轮 提问/回答 追加进历史（供下一轮参考）
+        if self.config.get("ai", {}).get("memory_enabled", True):
+            user_prompt = getattr(self, "_last_user_prompt", "") or ""
+            if user_prompt:
+                self._history.append({"role": "user", "content": user_prompt})
+                self._history.append({"role": "assistant", "content": text or ""})
+                self._trim_history()
+                self._refresh_mem_label()
         self.status_label.setText("✅ 生成完成")
         self.send_btn.setEnabled(True)
 

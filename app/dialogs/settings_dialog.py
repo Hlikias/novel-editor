@@ -240,13 +240,19 @@ class SettingsDialog(GradientDialog):
         hint.setObjectName("mutedLabel")
         api_form.addRow("", hint)
 
-        # 全局 AI 参考：技能 + 作者身份 注入所有 AI 请求
+        # 全局 AI 参考（每个选项独立可开关）
         ai_cfg = config.get("ai", {})
-        self.global_context_check = QCheckBox(
-            "全局 AI 参考：把当前技能与作者身份注入所有 AI 请求（AI 面板与各 AI 任务）"
-        )
-        self.global_context_check.setChecked(bool(ai_cfg.get("global_context", True)))
-        api_form.addRow("", self.global_context_check)
+        # 兼容旧版单一开关 global_context
+        old_ctx = ai_cfg.get("global_context", True)
+        self.global_skill_check = QCheckBox("注入当前技能指令（所有 AI 请求）")
+        self.global_skill_check.setChecked(bool(ai_cfg.get("global_skill", old_ctx)))
+        api_form.addRow("", self.global_skill_check)
+        self.global_identity_check = QCheckBox("注入作者身份（所有 AI 请求）")
+        self.global_identity_check.setChecked(bool(ai_cfg.get("global_identity", old_ctx)))
+        api_form.addRow("", self.global_identity_check)
+        self.memory_check = QCheckBox("AI 面板对话记忆（多轮上下文，发送时携带历史）")
+        self.memory_check.setChecked(bool(ai_cfg.get("memory_enabled", True)))
+        api_form.addRow("", self.memory_check)
         self.tabs.addTab(api_tab, "🌐 API 设置")
 
         # ---------- 编辑器设置 ----------
@@ -692,8 +698,12 @@ class SettingsDialog(GradientDialog):
         privacy["ai_enabled"] = self.ai_net_check.isChecked()
         privacy["network_quotes"] = self.quote_net_check.isChecked()
 
-        # 全局 AI 参考（技能+身份注入所有 AI 请求）
-        self.config.setdefault("ai", {})["global_context"] = self.global_context_check.isChecked()
+        # 全局 AI 参考（每个选项独立开关）
+        self.config.setdefault("ai", {}).update({
+            "global_skill": self.global_skill_check.isChecked(),
+            "global_identity": self.global_identity_check.isChecked(),
+            "memory_enabled": self.memory_check.isChecked(),
+        })
 
         # 自定义快捷键
         new_sc = {}
