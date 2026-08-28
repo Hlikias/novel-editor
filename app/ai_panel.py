@@ -37,7 +37,7 @@ class AICallWorker(QThread):
 
     def __init__(self, base_url: str, api_key: str, model: str,
                  temperature: float, system_prompt: str, user_prompt: str,
-                 stream: bool = True, parent=None):
+                 history: list | None = None, stream: bool = True, parent=None):
         super().__init__(parent)
         self.base_url = base_url
         self.api_key = api_key
@@ -45,6 +45,7 @@ class AICallWorker(QThread):
         self.temperature = temperature
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
+        self.history = history or []   # 多轮对话记忆：[{role, content}, ...]
         self.stream = stream
 
     def run(self):
@@ -78,10 +79,11 @@ class AICallWorker(QThread):
         payload = {
             "model": self.model,
             "stream": self.stream,
-            "messages": [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": self.user_prompt},
-            ],
+            "messages": (
+                [{"role": "system", "content": self.system_prompt}]
+                + list(self.history)
+                + [{"role": "user", "content": self.user_prompt}]
+            ),
         }
         if include_temperature:
             payload["temperature"] = self.temperature
@@ -195,7 +197,7 @@ class AIPanel(QWidget):
         btn_row = QHBoxLayout()
         self.send_btn = QPushButton("🚀 发送给 AI")
         self.insert_btn = QPushButton("📥 插入到编辑器")
-        self.clear_btn = QPushButton("清空")
+        self.clear_btn = QPushButton("🧹 清空对话")
         self.stream_check = QCheckBox("流式输出")
         self.stream_check.setChecked(True)
         self.send_btn.clicked.connect(self.send)
@@ -207,10 +209,32 @@ class AIPanel(QWidget):
         btn_row.addWidget(self.stream_check)
         layout.addLayout(btn_row)
 
+        # 对话记忆（多轮上下文）
+        self._history: list[dict] = []
+        self._mem_label = QLabel("")
+        self._mem_label.setObjectName("mutedLabel")
+        self._refresh_mem_label()
+        layout.addWidget(self._mem_label)
+
         # 状态
         self.status_label = QLabel("")
         self.status_label.setObjectName("mutedLabel")
         layout.addWidget(self.status_label)
+
+    # ---------- 对话记忆 ----------
+    MAX_HISTORY = 12          # 最多保留轮数（条）
+    MAX_MSG_CHARS = 4000      # 单条记忆最长字符
+
+    def _trim_history(self):
+        if len(self._history) > self.MAX_HISTORY:
+            self._history = self._history[-self.MAX_HISTORY:]
+        for m in self._history:
+            if len(m.get("content", "")) > self.MAX_MSG_CHARS:
+                m["content"] = m["content"][:self.MAX_MSG_CHARS] + "…"
+
+    def _refresh_mem_label(self):
+        n = len(self._history) // 2
+        self._mem_label.setText(f"🧠 对话记忆：已记住 {n} 轮（清空对话可重置）" if n else "")
 
     # ---------- 布局自适应 ----------
     def set_layout_for_dock(self, area) -> None:
@@ -247,19 +271,23 @@ class AIPanel(QWidget):
         return data if isinstance(data, dict) else None
 
     def _build_system_prompt(self) -> str:
-        """组合系统提示：默认 system_prompt + 选中技能指令 + 作者身份（供 AI 参考）。"""
+        """组合系统提示：默认 system_prompt + 全局参考（技能指令 + 作者身份）。
+
+        全局参考由 config["ai"]["global_context"] 控制（默认开启）：
+        开启时所有 AI 调用（AI 面板发送与各 run_task 任务）都注入技能与身份。"""
         parts = [self.config.get("api", {}).get("system_prompt", "") or ""]
-        skill = self._selected_skill()
-        if skill and (skill.get("system_prompt") or "").strip():
-            parts.append(skill["system_prompt"].strip())
-        ident = self.config.get("identity") or {}
-        if any(str(v).strip() for v in ident.values()):
-            labels = {"pen_name": "笔名", "bio": "简介", "preferences": "写作偏好",
-                      "contact": "联系方式", "works": "作品"}
-            bits = [f"{labels.get(k, k)}：{str(v).strip()}"
-                    for k, v in ident.items() if str(v).strip()]
-            if bits:
-                parts.append("【作者身份（写作时参考）】" + "；".join(bits))
+        if self.config.get("ai", {}).get("global_context", True):
+            skill = self._selected_skill()
+            if skill and (skill.get("system_prompt") or "").strip():
+                parts.append(skill["system_prompt"].strip())
+            ident = self.config.get("identity") or {}
+            if any(str(v).strip() for v in ident.values()):
+                labels = {"pen_name": "笔名", "bio": "简介", "preferences": "写作偏好",
+                          "contact": "联系方式", "works": "作品"}
+                bits = [f"{labels.get(k, k)}：{str(v).strip()}"
+                        for k, v in ident.items() if str(v).strip()]
+                if bits:
+                    parts.append("【作者身份（写作时参考）】" + "；".join(bits))
         return "\n".join(p for p in parts if p.strip())
 
     # ---------- 行为 ----------
@@ -307,10 +335,13 @@ class AIPanel(QWidget):
         self.status_label.setText("⏳ 正在调用 AI……")
         self.send_btn.setEnabled(False)
         self.output_edit.clear()
+        self._last_user_prompt = prompt
+        self._trim_history()
         self._worker = AICallWorker(
             base_url, api_key, model,
             float(api_cfg.get("temperature", 0.7)),
             self._build_system_prompt(), prompt,
+            history=list(self._history),
             stream=self.stream_check.isChecked(),
             parent=self,
         )
@@ -409,6 +440,13 @@ class AIPanel(QWidget):
         # 非流式模式：完整结果在此一次性返回，需显示出来
         if text:
             self.output_edit.setPlainText(text)
+        # 对话记忆：把本轮 提问/回答 追加进历史（供下一轮参考）
+        user_prompt = getattr(self, "_last_user_prompt", "") or ""
+        if user_prompt:
+            self._history.append({"role": "user", "content": user_prompt})
+            self._history.append({"role": "assistant", "content": text or ""})
+            self._trim_history()
+            self._refresh_mem_label()
         self.status_label.setText("✅ 生成完成")
         self.send_btn.setEnabled(True)
 
@@ -430,6 +468,8 @@ class AIPanel(QWidget):
 
     def _clear(self):
         self.output_edit.clear()
+        self._history.clear()
+        self._refresh_mem_label()
         self.status_label.setText("")
 
     def insert_to_editor(self):

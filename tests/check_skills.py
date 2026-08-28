@@ -118,6 +118,62 @@ sp2 = panel._build_system_prompt()
 check("无技能时无技能指令", "散文家指令" not in sp2)
 check("无技能时仍有身份", "作者身份" in sp2)
 
+# 全局开关关闭 → 不注入技能/身份
+panel.config.setdefault("ai", {})["global_context"] = False
+sp3 = panel._build_system_prompt()
+check("关闭全局参考后无技能身份", "散文家指令" not in sp3 and "作者身份" not in sp3)
+panel.config["ai"]["global_context"] = True
+
+# ---------- 对话记忆 ----------
+check("初始无记忆", panel._history == [] and panel._mem_label.text() == "")
+panel._last_user_prompt = "帮我写个开头"
+panel._on_ok("好的，这是开头……")
+check("回复后记忆追加2条", len(panel._history) == 2 and panel._history[0]["role"] == "user"
+      and panel._history[1]["role"] == "assistant")
+check("记忆轮数显示", "1 轮" in panel._mem_label.text())
+# 第二次发送携带历史
+sent_hist = []
+class FakeConn:
+    def connect(self, *a): pass
+class FakeWorker:
+    def __init__(self, *a, **k):
+        sent_hist.append(k.get("history"))
+        self.chunk_received = FakeConn()
+        self.finished_ok = FakeConn()
+        self.finished_err = FakeConn()
+    def start(self): pass
+orig_worker = __import__("app.ai_panel", fromlist=["AICallWorker"]).AICallWorker
+import app.ai_panel as ap
+ap.AICallWorker = FakeWorker
+panel.prompt_edit.setPlainText("继续")
+panel.send()
+check("第二次发送携带历史", len(sent_hist) == 1 and len(sent_hist[0]) == 2)
+ap.AICallWorker = orig_worker
+# 清空对话 → 记忆清空
+panel._clear()
+check("清空对话后记忆为空", panel._history == [] and panel._mem_label.text() == "")
+
+# AICallWorker 多轮 messages 结构
+captured = {}
+import app.ai_panel as _ap
+def fake_urlopen(req, timeout=300):
+    import json as _j
+    captured["data"] = _j.loads(req.data.decode("utf-8"))
+    class R:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def __iter__(self): return iter([])
+        def read(self): return b'{"choices":[{"message":{"content":"ok"}}]}'
+    return R()
+_ap.urllib.request.urlopen = fake_urlopen
+w = _ap.AICallWorker("http://x/v1", "k", "m", 0.7, "sys", "新问题",
+                     history=[{"role": "user", "content": "h1"}, {"role": "assistant", "content": "a1"}],
+                     stream=False)
+w._request(include_temperature=True)
+msgs = captured["data"]["messages"]
+check("messages 含 system+历史+user", msgs[0]["role"] == "system"
+      and msgs[1]["content"] == "h1" and msgs[2]["content"] == "a1" and msgs[3]["content"] == "新问题")
+
 # ---------- 4) 帮助菜单免责声明 ----------
 win = MainWindow()
 flat = []
