@@ -34,8 +34,7 @@ class TemplateExportDialog(GradientDialog):
         super().__init__("📋 按范本导出（AI）", parent)
         self.on_export = on_export
         self.fmt: DocFormat | None = None
-        self.tpl_text: str = ""
-        self.setMinimumSize(640, 720)
+        self.setMinimumSize(640, 700)
 
         body = self.body
 
@@ -115,27 +114,17 @@ class TemplateExportDialog(GradientDialog):
         self.mode_radios: list[tuple[str, QRadioButton]] = []
         for key, label in MODES:
             rb = QRadioButton(label)
+            rb.toggled.connect(self._sync_mode_hint)
             self.mode_radios.append((key, rb))
             mode_lay.addWidget(rb)
         self.mode_radios[0][1].setChecked(True)
         body.addWidget(mode_widget)
 
-        # ---- 参考范本内容（AI 参考范本全文的风格/结构） ----
-        self.tpl_ref_check = QCheckBox(
-            "📎 让 AI 参考范本的内容风格（把范本文本发给 AI，模仿其结构与语气；仅范本模式有效）"
-        )
-        self.tpl_ref_check.setChecked(True)
-        self.tpl_ref_check.setEnabled(False)   # 未选范本时不可用
-        body.addWidget(self.tpl_ref_check)
-
         # ---- 内容/要求 ----
         self.input_edit = QPlainTextEdit()
-        self.input_edit.setPlaceholderText(
-            "✍️ 写作要求（AI 生成）：例如“写一篇 800 字的散文《夜雨》，以雨夜老街为背景，"
-            "语言优美，结尾有回味”。\n\n🪄 或粘贴你已有的文章正文（AI 润色 / 直接排版）。"
-        )
         self.input_edit.setMinimumHeight(140)
         body.addWidget(self.input_edit)
+        self._sync_mode_hint()
 
         opt = QFormLayout()
         self.words_spin = QSpinBox()
@@ -174,6 +163,22 @@ class TemplateExportDialog(GradientDialog):
         use_tpl = self.tpl_radio.isChecked()
         self.tpl_widget.setVisible(use_tpl)
         self.manual_widget.setVisible(not use_tpl)
+        self._sync_mode_hint()
+
+    def _sync_mode_hint(self):
+        """输入框提示随模式变化：AI 生成=写作要求；润色/直接排版=粘贴文章。"""
+        if not getattr(self, "mode_radios", None) or not hasattr(self, "input_edit"):
+            return
+        mode = self.mode()
+        if mode == "ai_gen":
+            self.input_edit.setPlaceholderText(
+                "✍️ 写作要求（AI 生成）：例如“写一篇 800 字的散文《夜雨》，以雨夜老街为背景，"
+                "语言优美，结尾有回味”。"
+            )
+        else:
+            self.input_edit.setPlaceholderText(
+                "📄 在此粘贴你已有的文章正文（AI 润色 / 直接按所选格式排版）。"
+            )
 
     def _browse_template(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -184,19 +189,13 @@ class TemplateExportDialog(GradientDialog):
             return
         self.tpl_edit.setText(path)
         try:
-            from ..docx_export import extract_template_text
             self.fmt = parse_template(path)
-            self.tpl_text = extract_template_text(path)
-            self.tpl_ref_check.setEnabled(True)
             self.tpl_status.setText(
-                f"✅ 已解析范本格式：\n{self.fmt.describe()}\n"
-                f"（范本文本 {len(self.tpl_text)} 字可作 AI 参考）"
+                f"✅ 已解析范本格式：\n{self.fmt.describe()}"
             )
             self.status.setText("范本已就绪")
         except Exception as e:  # noqa: BLE001
             self.fmt = None
-            self.tpl_text = ""
-            self.tpl_ref_check.setEnabled(False)
             self.tpl_status.setText(f"❌ 解析范本失败：{e}")
             self.status.setText("")
 
@@ -242,17 +241,14 @@ class TemplateExportDialog(GradientDialog):
         if self.on_export is None:
             self.status.setText("❌ 导出回调未注入")
             return
-        # 范本参考文本：仅范本模式且勾选参考时传
-        tpl_text = ""
-        if self.tpl_radio.isChecked() and self.tpl_ref_check.isChecked():
-            tpl_text = getattr(self, "tpl_text", "") or ""
+        # 导出格式仅按所选来源（范本/手动），AI 只参考格式规范，不附带范本文本
         mode = self.mode()
         kind = self.export_kind()
         self._busy = True
         self.export_btn.setEnabled(False)
         self.status.setText("⏳ 处理中…")
         self.on_export(mode, text, fmt, self.words_spin.value(),
-                       self.extra_edit.text().strip(), kind, tpl_text, self._done)
+                       self.extra_edit.text().strip(), kind, self._done)
 
     def _done(self, err: str | None):
         self._busy = False

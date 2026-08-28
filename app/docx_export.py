@@ -411,28 +411,3 @@ def convert_doc_to_docx(path: str) -> str:
         "无法读取 .doc 老格式：本机未检测到可用的 Word/WPS。\n"
         "请在 Word 中把范本另存为 .docx 后再试。" + (f"（{last_err}）" if last_err else "")
     )
-
-
-def extract_template_text(path: str, max_chars: int = 3000) -> str:
-    """提取范本文本的纯文本（前 max_chars 字），供 AI 参考风格/结构。
-
-    .doc 老格式先经 Word/WPS 转换。取前几个非空段落，去掉过长行。"""
-    docx_path = convert_doc_to_docx(path) if path.lower().endswith(".doc") else path
-    try:
-        doc = Document(docx_path)
-    finally:
-        if docx_path != path:
-            try:
-                os.remove(docx_path)
-            except Exception:  # noqa: BLE001
-                pass
-    lines = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
-    out: list[str] = []
-    total = 0
-    for ln in lines:
-        piece = ln if len(ln) <= 200 else ln[:200] + "…"
-        out.append(piece)
-        total += len(piece)
-        if total >= max_chars:
-            break
-    return "\n".join(out)

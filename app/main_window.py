@@ -2628,10 +2628,10 @@ class MainWindow(QMainWindow):
         self._tpl_export_dialog.activateWindow()
 
     def _tpl_export(self, mode: str, text: str, fmt, words: int,
-                    extra: str, kind: str, tpl_text: str, done_cb):
+                    extra: str, kind: str, done_cb):
         """按范本/手动格式导出：plain=直接排版；ai_gen/ai_polish=AI 处理后按格式导出。
 
-        kind: docx / pdf；tpl_text: 范本文本（供 AI 参考风格/结构，可空）。"""
+        kind: docx / pdf。AI 只按 fmt 的排版规范（layout_instructions）输出，不附带范本文本。"""
         if mode == "plain":
             title = self._current_ch_title()
             self._tpl_save(text, fmt, done_cb, title=title, kind=kind)
@@ -2640,13 +2640,6 @@ class MainWindow(QMainWindow):
             prompt = (
                 "你是一位资深中文写作者。请按用户要求写一篇文章。\n"
                 + fmt.layout_instructions() + "\n"
-            )
-            if tpl_text:
-                prompt += (
-                    "【范本参考（用户提供的范本文本，请模仿其结构与语气，但内容须按写作要求）】\n"
-                    + tpl_text + "\n"
-                )
-            prompt += (
                 f"【写作要求】\n{text}\n"
                 f"【目标字数】约 {int(words)} 字\n"
                 f"【附加要求】{extra if extra else '无'}\n"
@@ -2661,13 +2654,6 @@ class MainWindow(QMainWindow):
                 "你是资深中文编辑。请润色以下文章：保持原意与整体结构，改进语言表达、"
                 "修正语病与用词，使其更流畅优美。\n"
                 + fmt.layout_instructions() + "\n"
-            )
-            if tpl_text:
-                prompt += (
-                    "【范本参考（用户提供的范本文本，请参考其结构与语气润色）】\n"
-                    + tpl_text + "\n"
-                )
-            prompt += (
                 f"【附加要求】{extra if extra else '无'}\n"
                 "【原文】\n" + text + "\n"
                 "【输出要求】第一行输出标题，第二行起为正文，自然分段（空行分段），"

@@ -183,13 +183,12 @@ check("模式单选钮可点选（互斥修复）", td.mode_radios[1][1].isCheck
 check("点模式不影响来源", td.tpl_radio.isChecked())
 td.manual_radio.setChecked(True)
 check("切来源后模式保持选中", td.mode_radios[1][1].isChecked())
-check("参考范本勾选初始禁用", not td.tpl_ref_check.isEnabled())
+# 输入框提示随模式变化
+td.mode_radios[2][1].setChecked(True)
+check("直接排版模式提示粘贴", "粘贴" in td.input_edit.placeholderText())
+td.mode_radios[0][1].setChecked(True)
+check("AI 生成模式提示写作要求", "写作要求" in td.input_edit.placeholderText())
 td.deleteLater()
-
-# 范本文本提取（供 AI 参考）
-from app.docx_export import extract_template_text
-txt = extract_template_text(tpl)
-check("范本文本提取非空", len(txt.strip()) > 0 and "范本标题" in txt)
 
 # ---------- 列表 + 页眉页脚 一比一 ----------
 # 1) 导出含列表的文档：- 与 1. 开头行 → Word 原生列表样式
