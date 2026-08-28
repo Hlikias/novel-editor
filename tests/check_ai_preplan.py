@@ -57,12 +57,19 @@ check("无效文本返回 None", _parse_preplan_json("不是json") is None)
 dlg = AIPreplanDialog(default_title="剑与星辰", default_genre="玄幻")
 dlg.creative_edit.setPlainText("少年持古剑踏上修行之路")
 dlg.style_combo.setCurrentText("热血")
+check("风格基调可编辑", dlg.style_combo.isEditable())
+dlg.style_combo.setEditText("穿越+搞笑")   # 自定义风格
 p = dlg.params()
 check("弹窗参数收集", p["title"] == "剑与星辰" and p["genre"] == "玄幻"
-      and "热血" in p["style"] and "worldview" in p["modules"] and "maps" in p["modules"])
-check("模块可取消勾选", dlg.module_checks["maps"].isChecked())
+      and p["style"] == "穿越+搞笑")
+check("模块含指定项", any(m["key"] == "worldview" for m in p["modules"]))
+dlg.module_specs["worldview"].setEditText("灵气复苏+宗门林立")
 dlg.module_checks["maps"].setChecked(False)
-check("取消后模块排除", "maps" not in dlg.params()["modules"])
+p2 = dlg.params()
+spec_map = {m["key"]: m["spec"] for m in p2["modules"]}
+check("模块指定生效", spec_map.get("worldview") == "灵气复苏+宗门林立")
+check("取消后模块排除", "maps" not in spec_map)
+check("默认指定为空", all(m["spec"] == "" for m in p2["modules"] if m["key"] != "worldview"))
 dlg.deleteLater()
 
 # ---------- 3) 写入项目各表 ----------
@@ -123,6 +130,19 @@ check("散文隐藏策划入口", not win._preplan_action.isVisible())
 win.close()
 st.close()
 st2.close()
+app.processEvents()
+
+# 写入完成后自动打开 设定管理/创作规划（patch 记录调用）
+opened = []
+st_reopen = Storage(st.db_path)
+win2 = MainWindow()
+win2._set_project(st_reopen)
+win2.show_character_dialog = lambda: opened.append("char")
+win2._show_planning_dialog = lambda *a, **k: opened.append("plan")
+win2._open_preplan_results()
+check("写入后自动打开设定管理+创作规划", opened == ["char", "plan"])
+win2.close()
+st_reopen.close()
 app.processEvents()
 
 print("\nRESULT:", "ALL PASS" if ok else "HAS FAILURES")

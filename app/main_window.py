@@ -1214,7 +1214,12 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _ai_preplan_prompt(p: dict) -> str:
-        modules = "、".join(p["modules"])
+        from .dialogs.ai_preplan_dialog import MODULES
+        label_map = {k: label for k, label, _o in MODULES}
+        mods = "、".join(
+            f"{label_map.get(m.get('key'), m.get('key'))}"
+            + (f"（{m.get('spec')}）" if m.get("spec") else "")
+            for m in p["modules"])
         return (
             "你是一位资深小说前期策划师。请为《" + (p["title"] or "未命名作品")
             + f"》（{p['genre']} · {p['btype']}）生成完整前期设定，帮助作者开始写作。\n"
@@ -1223,7 +1228,7 @@ class MainWindow(QMainWindow):
             f"【风格基调】{p['style']}\n"
             f"【目标篇幅】{p['length']}\n"
             f"【核心冲突】{p['conflict'] or '由你设计'}\n"
-            f"【需要生成的模块】{modules}\n"
+            f"【需要生成的模块及用户指定】{mods}\n"
             "【输出要求】只输出一个 JSON 对象（不要 markdown 代码块标记、不要任何解释文字），结构如下：\n"
             "{\n"
             '  "worldview": {"name":"","genre":"","description":"","era":"","rules":"",'
@@ -1392,9 +1397,20 @@ class MainWindow(QMainWindow):
                 f"AI 前期策划已写入：角色 {n_chars}、大纲 {n_outline}、伏笔 {n_fs}、"
                 f"剧情线 {n_lines} 条（{n_nodes} 节点）、力量体系 {n_pl} 级", "ok")
             done_cb(None)
+            # 写入完成：自动打开 项目设定管理 → 创作规划，让作者直接查看/调整
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(300, self._open_preplan_results)
         except Exception as e:  # noqa: BLE001
             self.log(f"AI 前期策划写入失败: {e}", "error")
             done_cb(str(e))
+
+    def _open_preplan_results(self):
+        """写入完成后依次打开 项目设定管理（默认大纲）与 创作规划，展示生成结果。"""
+        try:
+            self.show_character_dialog()          # 默认大纲页
+            self._show_planning_dialog(False)     # 创作规划（不强制聚焦当前章）
+        except Exception:  # noqa: BLE001
+            pass
 
     def _gen_chapter_prompt(self, req: dict, prev_tail: str, book_title: str,
                             context: str = "") -> str:

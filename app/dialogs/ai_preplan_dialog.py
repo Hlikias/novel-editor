@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPlainTextEdit, QPushButton, QVBoxLayout,
+    QPlainTextEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
 from ..dialog_base import GradientDialog
@@ -29,12 +29,20 @@ def _parse_preplan_json(text: str) -> dict | None:
         return data if isinstance(data, dict) else None
     except Exception:  # noqa: BLE001
         return None
-STYLES = ["热血", "悬疑", "轻松", "虐心", "群像", "文艺", "沉稳", "幽默", "暗黑"]
+STYLES = ["热血", "悬疑", "轻松", "虐心", "群像", "文艺", "沉稳", "幽默", "暗黑",
+          "穿越", "搞笑/沙雕", "甜宠", "无限流", "克苏鲁", "赛博朋克", "修真", "种田"]
 LENGTHS = ["短篇（约 5 千字）", "中篇（约 5 万字）", "长篇（约 20 万字）", "鸿篇（约 100 万字）"]
 MODULES = [
-    ("worldview", "🌍 世界观"), ("characters", "👤 角色"), ("outline", "📑 大纲"),
-    ("foreshadows", "🪝 伏笔"), ("storylines", "📈 剧情线"), ("power_levels", "⚔ 力量体系"),
-    ("tech_nodes", "🔬 科技树"), ("timeline", "⏱ 时间线"), ("maps", "🗺 地图"),
+    ("worldview", "🌍 世界观", ["东方玄幻·宗门林立", "西方奇幻·诸神战争", "科幻末世·废土",
+                                 "都市异闻·灵气复苏", "星际文明·宇宙争霸", "穿越古代·王朝争霸"]),
+    ("characters", "👤 角色", ["1 主角 + 2 配角 + 1 反派", "双主角", "多主角群像"]),
+    ("outline", "📑 大纲", ["起承转合 8 节点", "三幕式", "卷章式（10 卷）"]),
+    ("foreshadows", "🪝 伏笔", ["3 大主线伏笔", "悬疑连环伏笔", "感情线伏笔"]),
+    ("storylines", "📈 剧情线", ["成长线+感情线", "事业线+复仇线", "多线并行"]),
+    ("power_levels", "⚔ 力量体系", ["修真境界", "斗气/斗者体系", "异能等级", "无等级（写实）"]),
+    ("tech_nodes", "🔬 科技树", ["硬科幻技术树", "黑科技", "赛博义体"]),
+    ("timeline", "⏱ 时间线", ["编年史大事记", "倒叙关键事件"]),
+    ("maps", "🗺 地图", ["门派/宗门分布图", "城市街区图", "世界地图", "星图"]),
 ]
 
 
@@ -72,7 +80,9 @@ class AIPreplanDialog(GradientDialog):
         self.protagonist_edit.setFixedHeight(50)
         form.addRow("主角设定", self.protagonist_edit)
         self.style_combo = QComboBox()
+        self.style_combo.setEditable(True)   # 可自定义风格（穿越/搞笑等流行设定）
         self.style_combo.addItems(STYLES)
+        self.style_combo.setToolTip("可输入自定义风格，如：穿越、搞笑、沙雕、甜宠、无限流…")
         form.addRow("风格基调", self.style_combo)
         self.length_combo = QComboBox()
         self.length_combo.addItems(LENGTHS)
@@ -82,26 +92,39 @@ class AIPreplanDialog(GradientDialog):
         form.addRow("核心冲突", self.conflict_edit)
         body.addLayout(form)
 
-        # 生成模块
-        body.addWidget(QLabel("生成模块"))
+        # 生成模块：checkbox + 可编辑 combo（用户指定该模块要求）
+        body.addWidget(QLabel("生成模块（可勾选模块并在右侧指定要求）"))
         mod_grid = QVBoxLayout()
-        row: list[QCheckBox] = []
         self.module_checks: dict[str, QCheckBox] = {}
-        for i, (key, label) in enumerate(MODULES):
+        self.module_specs: dict[str, QComboBox] = {}
+        row_widgets: list[QWidget] = []
+        for key, label, opts in MODULES:
+            cell = QWidget()
+            cl = QHBoxLayout(cell)
+            cl.setContentsMargins(0, 0, 0, 0)
             cb = QCheckBox(label)
             cb.setChecked(True)
+            spec = QComboBox()
+            spec.setEditable(True)
+            spec.setMinimumWidth(190)
+            spec.addItem("（默认设计）")
+            spec.addItems(opts)
+            spec.setToolTip("可输入自定义要求，如世界观：灵气复苏+宗门林立")
+            cl.addWidget(cb)
+            cl.addWidget(spec, 1)
             self.module_checks[key] = cb
-            row.append(cb)
-            if len(row) == 3:
+            self.module_specs[key] = spec
+            row_widgets.append(cell)
+            if len(row_widgets) == 3:
                 rl = QHBoxLayout()
-                for c in row:
+                for c in row_widgets:
                     rl.addWidget(c)
                 rl.addStretch(1)
                 mod_grid.addLayout(rl)
-                row = []
-        if row:
+                row_widgets = []
+        if row_widgets:
             rl = QHBoxLayout()
-            for c in row:
+            for c in row_widgets:
                 rl.addWidget(c)
             rl.addStretch(1)
             mod_grid.addLayout(rl)
@@ -131,16 +154,24 @@ class AIPreplanDialog(GradientDialog):
 
     # ---------- 参数 ----------
     def params(self) -> dict:
+        mods = []
+        for key, cb in self.module_checks.items():
+            if not cb.isChecked():
+                continue
+            spec = self.module_specs[key].currentText().strip()
+            if spec in ("", "（默认设计）"):
+                spec = ""
+            mods.append({"key": key, "spec": spec})
         return {
             "title": self.title_edit.text().strip(),
             "btype": self.type_combo.currentText(),
             "genre": self.genre_combo.currentText(),
             "creative": self.creative_edit.toPlainText().strip(),
             "protagonist": self.protagonist_edit.toPlainText().strip(),
-            "style": self.style_combo.currentText(),
+            "style": self.style_combo.currentText().strip() or "热血",
             "length": self.length_combo.currentText(),
             "conflict": self.conflict_edit.text().strip(),
-            "modules": [k for k, cb in self.module_checks.items() if cb.isChecked()],
+            "modules": mods,
         }
 
     def _generate(self):
