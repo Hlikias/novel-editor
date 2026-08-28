@@ -145,5 +145,44 @@ win2.close()
 st_reopen.close()
 app.processEvents()
 
+# ---------- 5) 每个模块描述都传给 AI ----------
+from app.main_window import MainWindow as _MW
+p3 = {"title": "X", "genre": "玄幻", "btype": "长篇小说", "creative": "c", "protagonist": "",
+      "style": "热血", "length": "长篇（约 20 万字）", "conflict": "",
+      "modules": [
+          {"key": "worldview", "spec": "灵气复苏+宗门林立"},
+          {"key": "characters", "spec": "主角是穿越者"},
+          {"key": "outline", "spec": ""},
+          {"key": "maps", "spec": "需要宗门分布图"},
+      ]}
+prompt = _MW._ai_preplan_prompt(p3)
+check("prompt 含每个勾选模块", "世界观" in prompt and "角色" in prompt
+      and "大纲" in prompt and "地图" in prompt)
+check("prompt 含模块详细描述", "灵气复苏+宗门林立" in prompt
+      and "主角是穿越者" in prompt and "宗门分布图" in prompt)
+
+# ---------- 6) 写入后 设定管理/创作规划 能看到生成数据 ----------
+st_r2 = Storage(st.db_path)
+from app.dialogs.character_dialog import CharacterDialog
+from app.planning_panel import PlanningDialog
+cd = CharacterDialog(st_r2)
+cd.show()
+app.processEvents()
+tab_c = [cd.tabs.tabText(i) for i in range(cd.tabs.count())]
+check("设定管理含 大纲/世界观/角色/地图", any("大纲" in t for t in tab_c)
+      and any("世界观" in t for t in tab_c) and any("角色" in t for t in tab_c)
+      and any("地图" in t for t in tab_c))
+cd.close()
+pd = PlanningDialog(storage=st_r2)
+pd.show()
+app.processEvents()
+tab_p = [pd.tabs.tabText(i) for i in range(pd.tabs.count())]
+check("创作规划含 伏笔/剧情线/体系/时间线", any("伏笔" in t for t in tab_p)
+      and any("剧情线" in t for t in tab_p) and any("体系" in t or "等级" in t for t in tab_p)
+      and any("时间线" in t for t in tab_p))
+pd.close()
+st_r2.close()
+app.processEvents()
+
 print("\nRESULT:", "ALL PASS" if ok else "HAS FAILURES")
 sys.exit(0 if ok else 1)
