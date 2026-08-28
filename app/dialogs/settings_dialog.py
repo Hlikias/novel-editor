@@ -498,8 +498,14 @@ class SettingsDialog(GradientDialog):
             "一个面向中文写作者的桌面写作工具：\n"
             "· VSCode 式多标签编辑器，支持首行缩进 / 自动换行 / GBK\n"
             "· 章节管理、角色 / 武器 / 属性设定管理\n"
-            "· AI 辅助写作（OpenAI 兼容接口）\n\n"
-            "基于 Python + PySide6 开发。"
+            "· AI 辅助写作（OpenAI 兼容接口）\n"
+            "· 技能（AI 角色预设）与作者身份\n\n"
+            "基于 Python + PySide6 开发。\n\n"
+            "──────── 免责声明 ────────\n\n"
+            "· 本软件仅供个人写作辅助使用；\n"
+            "· AI 生成内容由第三方大模型提供，仅供参考，发表前请自行核对修改；\n"
+            "· 使用 AI 联网功能时相关文本会发送到你配置的服务，勿输入涉密内容；\n"
+            "· 你的作品版权归你所有，请遵守相关法律法规。"
         )
         about_label.setWordWrap(True)
         about_layout.addWidget(about_label)

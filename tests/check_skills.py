@@ -129,6 +129,11 @@ check("帮助菜单含免责声明", any("免责声明" in t for t in flat))
 QMessageBox.information = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Ok)
 win.show_disclaimer()
 check("免责声明弹窗不报错", True)
+# 关于对话框也含免责声明
+captured = {}
+QMessageBox.about = staticmethod(lambda parent, title, text: captured.update(t=text))
+win.show_about()
+check("关于对话框含免责声明", "免责声明" in captured.get("t", ""))
 win.close()
 
 app.processEvents()
