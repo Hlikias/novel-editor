@@ -2490,7 +2490,10 @@ class MainWindow(QMainWindow):
         self.check_view.set_storage(storage)
         if hasattr(self, "consistency_view"):
             self.consistency_view.set_storage(storage)
-        self.outline_view.set_storage(storage)
+        # 统计/大纲视图的树在万章级项目下构建很重：只绑定存储，
+        # 由 _refresh_chapter_dock 末尾的延迟合并刷新在事件循环后构建，先出界面
+        self.stats_view.storage = storage
+        self.outline_view.storage = storage
         self.overview_view.set_storage(storage)
         self._refresh_chapter_dock()
         self._sync_unit_terms()
@@ -2650,6 +2653,7 @@ class MainWindow(QMainWindow):
         保存章节只走 _update_tree_item 局部更新，避免 1000+ 章时每次保存重建整棵树；
         统计/大纲视图改为延迟合并刷新（_schedule_aux_refresh）。"""
         self._updating_tree = True
+        self._total_cache = None   # 章节结构/字数变化 → 全书字数缓存失效
         self.chapter_tree.setUpdatesEnabled(False)
         try:
             self.chapter_tree.clear()
@@ -3047,6 +3051,7 @@ class MainWindow(QMainWindow):
         ch.word_count = new_wc
         ch.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.storage.update_chapter(ch)
+        self._total_cache = None   # 全书字数缓存失效（保存后下次状态栏重算）
         # 记录今日净新增字数（趋势图）
         if hasattr(self, "word_tracker"):
             self.word_tracker.record(new_wc - old_wc)
@@ -4340,6 +4345,17 @@ class MainWindow(QMainWindow):
         if editor is not None and hasattr(self, "editor_tips_label"):
             self.editor_tips_label.setText(self._line_setting_hits(editor))
 
+    def _cached_total(self) -> int:
+        """全书已存字数（缓存；万章级下 total_words SQL 聚合约 160ms，
+        状态栏每 150ms 更新一次不能每次重查——章节写操作经
+        _refresh_chapter_dock/_save_editor 失效缓存）。"""
+        if getattr(self, "_total_cache", None) is None:
+            try:
+                self._total_cache = self.storage.total_words() if self.storage else 0
+            except Exception:  # noqa: BLE001   # 项目切换/git 回溯期间连接可能刚关闭
+                self._total_cache = 0
+        return self._total_cache
+
     def _update_status(self):
         if self.storage is not None:
             try:
@@ -4366,7 +4382,13 @@ class MainWindow(QMainWindow):
             )
             self.para_label.setText(f"段落 {stats['paragraphs']} · 行 {lines}")
             if self.storage is not None:
-                saved_others = self.storage.total_words(exclude_id=cid)
+                saved_others = self._cached_total()
+                if cid is not None:
+                    try:
+                        c0 = self.storage.get_chapter(cid)
+                        saved_others -= c0.word_count if c0 else 0
+                    except Exception:  # noqa: BLE001
+                        pass
                 self.total_label.setText(
                     f"全书 {saved_others + stats['total']} 字 · "
                     f"{self.storage.count_chapters()} {unit}"
@@ -4384,7 +4406,13 @@ class MainWindow(QMainWindow):
             self.editor_this_label.setText(f"本{unit} {stats['total']} 字")
             self.editor_para_label.setText(f"段落 {stats['paragraphs']} · 行 {lines}")
             if self.storage is not None:
-                saved_others = self.storage.total_words(exclude_id=cid)
+                saved_others = self._cached_total()
+                if cid is not None:
+                    try:
+                        c0 = self.storage.get_chapter(cid)
+                        saved_others -= c0.word_count if c0 else 0
+                    except Exception:  # noqa: BLE001
+                        pass
                 self.editor_total_label.setText(
                     f"📚 全书 {saved_others + stats['total']} 字 · "
                     f"{self.storage.count_chapters()} {unit}"
@@ -4401,7 +4429,7 @@ class MainWindow(QMainWindow):
             self.para_label.setText("段落 0 · 行 0")
             if self.storage is not None:
                 self.total_label.setText(
-                    f"全书 {self.storage.total_words()} 字 · "
+                    f"全书 {self._cached_total()} 字 · "
                     f"{self.storage.count_chapters()} {unit}"
                 )
             else:
@@ -4414,7 +4442,7 @@ class MainWindow(QMainWindow):
             self.editor_para_label.setText("段落 0 · 行 0")
             if self.storage is not None:
                 self.editor_total_label.setText(
-                    f"📚 全书 {self.storage.total_words()} 字 · "
+                    f"📚 全书 {self._cached_total()} 字 · "
                     f"{self.storage.count_chapters()} 章"
                 )
             else:

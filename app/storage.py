@@ -298,6 +298,11 @@ class Storage:
         self.conn.executescript(SCHEMA)
         self.conn.commit()
         self._migrate()
+        self._cache: dict = {}   # 章节列表等查询缓存（写操作时失效）
+
+    def _invalidate(self, *keys: str) -> None:
+        for k in keys:
+            self._cache.pop(k, None)
 
     def _migrate(self) -> None:
         """旧库升级：补充新增列。"""
@@ -435,10 +440,17 @@ class Storage:
 
     # ---------- 章节 ----------
     def list_chapters(self) -> List[Chapter]:
+        """全部章节（按 order,id）。结果按实例缓存，章节写操作时失效；
+        大项目（万章级）下同一批视图刷新可复用，避免重复全表拉取。"""
+        cached = self._cache.get("chapters")
+        if cached is not None:
+            return list(cached)   # 浅拷贝，防调用方污染缓存
         rows = self.conn.execute(
             "SELECT * FROM chapters ORDER BY \"order\" ASC, id ASC"
         ).fetchall()
-        return [Chapter(**dict(r)) for r in rows]
+        out = [Chapter(**dict(r)) for r in rows]
+        self._cache["chapters"] = out
+        return list(out)
 
     def count_chapters(self) -> int:
         row = self.conn.execute("SELECT COUNT(*) AS n FROM chapters").fetchone()
@@ -480,6 +492,7 @@ class Storage:
              ch.created_at, ch.updated_at),
         )
         self.conn.commit()
+        self._invalidate("chapters")
         return cur.lastrowid
 
     def update_chapter(self, ch: Chapter) -> None:
@@ -490,6 +503,7 @@ class Storage:
              ch.outline_stage, ch.content, ch.word_count, ch.updated_at, ch.id),
         )
         self.conn.commit()
+        self._invalidate("chapters")
 
     def delete_chapter(self, chapter_id: int) -> None:
         # 软删除：先移入回收站（可恢复），再级联清理关联数据
@@ -510,6 +524,7 @@ class Storage:
         self.conn.execute("DELETE FROM map_positions WHERE chapter_id=?", (chapter_id,))
         self.conn.execute("DELETE FROM chapter_maps WHERE chapter_id=?", (chapter_id,))
         self.conn.commit()
+        self._invalidate("chapters")
 
     # ---------- 回收站 ----------
     def list_recycle(self) -> List[RecycleEntry]:
@@ -536,6 +551,7 @@ class Storage:
         )
         self.conn.execute("DELETE FROM recycle WHERE id=?", (rid,))
         self.conn.commit()
+        self._invalidate("chapters")
         return cur.lastrowid > 0
 
     def purge_recycle(self, rid: int) -> None:

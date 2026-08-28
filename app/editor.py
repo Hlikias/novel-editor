@@ -568,6 +568,16 @@ class EditorWidget(QTextEdit):
 
     # ---------- 高亮（当前行 + 查找匹配） ----------
     def _update_extra_selections(self):
+        """刷新当前行高亮与查找匹配。光标位置与查找词都没变时跳过
+        （setExtraSelections 会触发整片重绘，万字号大文档下高频调用是输入卡顿源）。"""
+        pos = self.textCursor().position()
+        if not self._match_text:
+            key = pos
+            if getattr(self, "_last_es_key", None) == key:
+                return
+            self._last_es_key = key
+        else:
+            self._last_es_key = None   # 有查找高亮时每次重算（命中位置可能变化）
         extra = []
         if not self.isReadOnly() and self.config.get("editor", {}).get("highlight_current_line", True):
             sel = QTextEdit.ExtraSelection()
@@ -594,6 +604,7 @@ class EditorWidget(QTextEdit):
     def set_match_highlight(self, text: str, case_sensitive: bool = False) -> None:
         self._match_text = text
         self._match_case = case_sensitive
+        self._last_es_key = None   # 强制重算（清除/更新查找高亮）
         self._update_extra_selections()
 
     def goto_line(self, line: int) -> None:
@@ -902,6 +913,7 @@ class EditorWidget(QTextEdit):
             self.setPlainText(text or "")
         self.document().setModified(False)
         self._match_text = ""
+        self._last_es_key = None   # 新文档：强制重算当前行高亮
         self._apply_style()
         self._update_extra_selections()
 
