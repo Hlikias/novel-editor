@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""验证：当前 vs 提交的左右分栏对比（红/绿高亮）。"""
+"""验证当前 git 对比功能：commit 导出对比、章节差异、行级 diff。"""
 import os
 import sys
 import tempfile
@@ -7,13 +7,11 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
-from PySide6.QtWidgets import QApplication, QPlainTextEdit
+from PySide6.QtWidgets import QApplication
 
-from app.git_manager import (GitManager, compare_chapters_detailed,
-                             export_db_from_commit)
+from app.git_manager import GitManager, compare_chapters, export_db_from_commit
 from app.models import Book, Chapter
 from app.storage import Storage
-from app.dialogs.diff_dialog import DiffDialog
 
 app = QApplication(sys.argv)
 
@@ -29,37 +27,29 @@ gm = GitManager(d)
 gm.init()
 short1 = gm.commit("v1")
 
-# 当前版本：修改第一行 + 新增一行
+# 当前版本：修改内容（字数变化）
 c2 = st.get_chapter(c.id)
 c2.content = "　　第一行新内容。\n　　第二行。\n　　第三行。\n　　第四行新增。"
+c2.word_count = 20   # 触发按字数对比的差异
 st.update_chapter(c2)
 
-# 对比当前工作区 vs 提交
+# 对比当前工作区 vs 提交（按标题/字数）
 tmp = export_db_from_commit(gm, short1, os.path.basename(st.db_path))
 try:
-    data = compare_chapters_detailed(tmp, st.db_path)
-    assert not data["empty"]
-    ch = data["changed"][0]
-    assert 0 in ch["old_del"], "旧版第一行应标记删除"
-    assert 0 in ch["new_add"], "新版第一行应标记新增"
-    assert 3 in ch["new_add"], "新增的第四行应标记新增"
-    print("diff 数据 OK: old_del=%s new_add=%s" % (sorted(ch["old_del"]), sorted(ch["new_add"])))
+    diff = compare_chapters(tmp, st.db_path)
+    assert isinstance(diff, str) and "第一章" in diff, diff
+    assert "[修改]" in diff, diff
+    print("1) 章节对比 OK:", diff.strip()[:60])
 finally:
     os.remove(tmp)
 
-# DiffDialog 展示
-dlg = DiffDialog(data)
-dlg.show()
-app.processEvents()
-assert dlg.chapter_combo.count() >= 1
-assert dlg.chapter_combo.currentText() == "第一章"
-# 左栏红高亮行数 = len(old_del)，右栏绿高亮行数 = len(new_add)
-left_extra = dlg.old_pane.extraSelections()
-right_extra = dlg.new_pane.extraSelections()
-print("左栏高亮:", len(left_extra), "右栏高亮:", len(right_extra))
-assert len(left_extra) == len(ch["old_del"]), "左栏高亮行数应与删除行数一致"
-assert len(right_extra) == len(ch["new_add"]), "右栏高亮行数应与新增行数一致"
-assert "第一行新内容" in dlg.new_pane.toPlainText()
-assert "第一行旧内容" in dlg.old_pane.toPlainText()
-dlg.close()
-print("DIFF DIALOG OK")
+# 行级 git diff（工作区 vs 提交：db 是二进制，diff 显示文件级变化）
+gm.commit("v2")
+stat = gm.diff_stat(short1, "HEAD")
+assert stat.strip(), "diff_stat 应显示 db 文件变化"
+print("2) diff_stat:", stat.strip()[:60])
+raw = gm.diff_text(short1, "HEAD")
+assert raw.strip() or "Binary" in raw, "行级 diff 应可用"
+print("3) diff_text 可用, 长度:", len(raw))
+
+print("DIFF (GIT) OK")

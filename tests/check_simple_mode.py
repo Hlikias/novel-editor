@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """验证简洁模式：隐藏辅助 dock 与格式栏，保留章节列表与状态栏。"""
 import os
 import sys
@@ -37,7 +37,8 @@ print("简洁模式开启 OK（辅助 dock/格式栏隐藏，章节列表+状态
 # 关闭恢复
 win.simple_mode_action.setChecked(False)
 app.processEvents()
-assert all(d.isVisible() for d in extra), "辅助 dock 应恢复显示"
+# 恢复到开启前状态（search_dock 默认隐藏属正常，按记录恢复即可）
+assert all(d.isVisible() == win._simple_visibility[d] for d in extra), "辅助 dock 应恢复到开启前状态"
 assert not win.format_bar.isHidden(), "格式工具栏应恢复（未显式隐藏）"
 assert win.config.get("app", {}).get("simple_mode") is False
 print("简洁模式关闭恢复 OK")
