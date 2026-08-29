@@ -1,0 +1,65 @@
+# ============================================================
+# macOS 打包（无 Mac 设备时用 GitHub Actions 免费 macOS 云服务器）
+#
+# 用法：
+#   1) 把项目推送到 GitHub（需 token；本仓库若已在 GitHub 则跳过）
+#   2) 到仓库页面 → Actions → 「Build macOS App」→ Run workflow
+#      （或推送 v* 标签自动触发）
+#   3) 跑完在本次运行底部 Artifacts 下载
+#      AI码小说-macos-arm64.zip / AI码小说-macos-x64.zip
+#   4) 解压得到 AI码小说.app，拖进「应用程序」即可
+#
+# 说明：
+#   · macos-latest = Apple 芯片(arm64)，macos-13 = Intel(x64)，
+#     两个架构并行各打一个包
+#   · 未做 Apple 签名/公证，首次打开如提示“无法验证开发者”：
+#     右键 → 打开；或 系统设置 → 隐私与安全性 → 仍要打开
+#   · 正式对外分发需 Apple Developer 账号签名+公证（可后续加）
+# ============================================================
+name: Build macOS App
+
+on:
+  workflow_dispatch:        # 仓库 Actions 页手动触发
+  push:
+    tags: ["v*"]            # 推送 v 开头的标签自动触发
+
+jobs:
+  build:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest   # Apple 芯片
+            arch: arm64
+          - runner: macos-13       # Intel
+            arch: x64
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyside6 python-docx pyinstaller
+
+      - name: 打包 macOS app
+        run: bash tools/build_macos.sh
+
+      - name: 校验产物
+        run: |
+          test -d dist/AI码小说.app && echo "✅ dist/AI码小说.app 已生成"
+          du -sh dist/AI码小说.app
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI码小说-macos-${{ matrix.arch }}
+          path: dist/AI码小说.app
+          if-no-files-found: error
