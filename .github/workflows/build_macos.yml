@@ -1,27 +1,26 @@
 # ============================================================
-# macOS 打包（无 Mac 设备时用 GitHub Actions 免费 macOS 云服务器）
+# macOS 打包并发布到 GitHub Release（无 Mac 设备时用 GitHub Actions 免费云服务器）
 #
 # 用法：
-#   1) 把项目推送到 GitHub（需 token；本仓库若已在 GitHub 则跳过）
-#   2) 到仓库页面 → Actions → 「Build macOS App」→ Run workflow
-#      （或推送 v* 标签自动触发）
-#   3) 跑完在本次运行底部 Artifacts 下载
-#      AI码小说-macos-arm64.zip / AI码小说-macos-x64.zip
-#   4) 解压得到 AI码小说.app，拖进「应用程序」即可
+#   1) 改完代码推送后，打标签（v 开头，Release 版本号）：
+#        git tag v1.0.0
+#        git push origin v1.0.0
+#   2) Actions 自动：双架构并行打包 → 自动创建 Release → 上传 zip
+#   3) 仓库页面 Code → Releases（或右侧 Releases）→ 下载
+#        AI码小说-macos-arm64.zip（Apple 芯片）/ AI码小说-macos-x64.zip（Intel）
 #
 # 说明：
-#   · macos-latest = Apple 芯片(arm64)，macos-13 = Intel(x64)，
-#     两个架构并行各打一个包
-#   · 未做 Apple 签名/公证，首次打开如提示“无法验证开发者”：
-#     右键 → 打开；或 系统设置 → 隐私与安全性 → 仍要打开
-#   · 正式对外分发需 Apple Developer 账号签名+公证（可后续加）
+#   · 手动触发（workflow_dispatch）只留 Artifacts，不创建 Release；
+#     要发布 Release 请用 v* 标签推送
+#   · 未做 Apple 签名/公证，首次打开提示“无法验证开发者”→ 右键 → 打开
+#   · Release 由 softprops/action-gh-release 创建，使用内置 GITHUB_TOKEN
 # ============================================================
 name: Build macOS App
 
 on:
-  workflow_dispatch:        # 仓库 Actions 页手动触发
+  workflow_dispatch:        # 仓库 Actions 页手动触发（仅出 Artifacts）
   push:
-    tags: ["v*"]            # 推送 v 开头的标签自动触发
+    tags: ["v*"]            # 推送 v 开头标签：打包 + 自动发布 Release
 
 jobs:
   build:
@@ -57,9 +56,32 @@ jobs:
           test -d dist/AI码小说.app && echo "✅ dist/AI码小说.app 已生成"
           du -sh dist/AI码小说.app
 
-      - name: 上传产物
+      - name: 压缩为 zip（保留 .app 结构）
+        run: |
+          ditto -c -k --keepParent dist/AI码小说.app "AI码小说-macos-${{ matrix.arch }}.zip"
+          ls -lh "AI码小说-macos-${{ matrix.arch }}.zip"
+
+      - name: 上传 Artifacts（手动触发时从这里下载）
         uses: actions/upload-artifact@v4
         with:
           name: AI码小说-macos-${{ matrix.arch }}
-          path: dist/AI码小说.app
+          path: AI码小说-macos-${{ matrix.arch }}.zip
           if-no-files-found: error
+
+  release:
+    name: 发布到 GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')   # 仅 v* 标签触发时发布
+    steps:
+      - name: 收集两个架构的 zip
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+          merge-multiple: true
+
+      - name: 创建 Release 并上传
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-artifacts/*.zip
+          generate_release_notes: true
