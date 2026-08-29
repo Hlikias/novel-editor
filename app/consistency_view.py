@@ -83,6 +83,8 @@ class ConsistencyView(QWidget):
             self.tabs.hide()
             self.empty_hint.setText("📂 请先打开项目（Ctrl+O），再扫描全书一致性。")
             self.empty_hint.show()
+            self.new_btn.show()
+            self.open_btn.show()
             self.empty_actions.setEnabled(True)
         else:
             # 尚未扫描：隐藏空 tab，展示引导（扫描后由 do_scan/do_appearances 恢复）
@@ -93,6 +95,8 @@ class ConsistencyView(QWidget):
                 "· 「角色出场统计」：看谁好久没出场，避免角色断线"
             )
             self.empty_hint.show()
+            self.new_btn.hide()
+            self.open_btn.hide()
             self.empty_actions.setEnabled(False)
 
     def do_scan(self):
@@ -102,6 +106,8 @@ class ConsistencyView(QWidget):
         self.hint_list.clear()
         hints = scan_consistency(self.storage)
         self.tabs.show()
+        self.new_btn.hide()
+        self.open_btn.hide()
         self.empty_actions.setEnabled(False)
         if not hints:
             self.hint_list.addItem("✅ 未发现与角色库/设定库名字疑似不一致的地方。")
@@ -130,6 +136,8 @@ class ConsistencyView(QWidget):
         self.appear_list.clear()
         rows = count_appearances(self.storage)
         self.tabs.show()
+        self.new_btn.hide()
+        self.open_btn.hide()
         self.empty_actions.setEnabled(False)
         if not rows:
             self.appear_list.addItem("（角色库为空或没有正文）")

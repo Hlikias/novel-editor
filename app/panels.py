@@ -78,6 +78,9 @@ class StatsView(QWidget):
     def _show_empty(self, text: str, with_buttons: bool):
         self.empty_hint.setText(text)
         self.empty_hint.show()
+        # 布局本身不能 show/hide：直接控制 新建/打开 按钮的可见性
+        self.new_btn.setVisible(with_buttons)
+        self.open_btn.setVisible(with_buttons)
         self.empty_actions.setEnabled(with_buttons)
 
     def refresh(self):
@@ -115,6 +118,8 @@ class StatsView(QWidget):
         if chapters:
             self.tree.show()
             self.empty_hint.hide()
+            self.new_btn.hide()
+            self.open_btn.hide()
             self.empty_actions.setEnabled(False)
         else:
             self.tree.hide()
@@ -207,8 +212,13 @@ class SearchView(QWidget):
         if storage is None:
             self.empty_hint.setText("📂 请先打开项目（Ctrl+O）再搜索。")
             self.empty_hint.show()
+            self.new_btn.show()
+            self.open_btn.show()
             self.empty_actions.setEnabled(True)
         else:
+            self.empty_hint.hide()
+            self.new_btn.hide()   # 已有项目：不再显示 新建/打开 按钮
+            self.open_btn.hide()
             self.empty_actions.setEnabled(False)
 
     def refresh_characters(self):
@@ -239,6 +249,8 @@ class SearchView(QWidget):
             self.status.setText("请先打开项目")
             self.empty_hint.setText("📂 请先打开项目（Ctrl+O）再搜索。")
             self.empty_hint.show()
+            self.new_btn.show()
+            self.open_btn.show()
             self.empty_actions.setEnabled(True)
             return
         kw = self.input.text().strip().lower()
@@ -246,6 +258,8 @@ class SearchView(QWidget):
             self.status.setText("请输入关键词")
             self.empty_hint.setText("🔍 输入关键词（支持标题/摘要/正文），回车或点「搜索」。")
             self.empty_hint.show()
+            self.new_btn.hide()
+            self.open_btn.hide()
             self.empty_actions.setEnabled(False)
             return
         count = 0
@@ -270,6 +284,8 @@ class SearchView(QWidget):
         self.status.setText(f"找到 {count} 个章节")
         if count:
             self.empty_hint.hide()
+            self.new_btn.hide()
+            self.open_btn.hide()
             self.empty_actions.setEnabled(False)
         else:
             self.empty_hint.setText(
@@ -279,6 +295,8 @@ class SearchView(QWidget):
                 "· 或先写几章内容，让全书可搜"
             )
             self.empty_hint.show()
+            self.new_btn.hide()
+            self.open_btn.hide()
             self.empty_actions.setEnabled(False)
 
     def _open_result(self, item):
