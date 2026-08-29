@@ -12,6 +12,7 @@
 # ============================================================
 set -e
 cd "$(dirname "$0")/.."
+ROOT="$(pwd)"
 
 PY=python3
 # 用带 PySide6 的解释器（conda/venv 请自行指向）
@@ -25,12 +26,12 @@ fi
 echo "== 检查 PyInstaller =="
 $PY -m PyInstaller --version >/dev/null 2>&1 || $PY -m pip install pyinstaller
 
-echo "== 打包 macOS app（x64 架构） =="
-# macOS 上如需 Intel 版可加:  --target-arch x86_64
+echo "== 打包 macOS app（当前架构） =="
+# 资源路径必须用绝对路径（相对路径会被 PyInstaller 误解析到 build/ 目录）
 $PY -m PyInstaller --noconfirm --clean --windowed --onefile \
   --name "AI码小说" \
-  --icon assets/icon.icns \
-  --add-data "assets/icon.icns:assets" \
+  --icon "$ROOT/assets/icon.icns" \
+  --add-data "$ROOT/assets/icon.icns:assets" \
   --collect-all app \
   --distpath dist --workpath build --specpath build \
   main.py
