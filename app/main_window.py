@@ -1959,7 +1959,7 @@ class MainWindow(QMainWindow):
         self.search_dock.setObjectName("search_dock")
         self.search_dock.setMinimumHeight(60)   # 底部 dock 可拉矮
         self.search_view = SearchView()
-        self.search_view.open_requested.connect(self.open_chapter)
+        self.search_view.open_requested.connect(self._open_search_result)
         self.search_view.new_project_requested.connect(self.new_project)
         self.search_view.open_project_requested.connect(self.open_project)
         self.search_dock.setWidget(self.search_view)
@@ -3558,19 +3558,28 @@ class MainWindow(QMainWindow):
         dlg.activateWindow()
         dlg.find_edit.setFocus()
 
+    def _open_search_result(self, cid: int, line: int):
+        """全文查找 dock 双击结果：打开章节 → 定位首个匹配 → 高亮全部匹配。"""
+        self._open_and_highlight(cid, line, self.search_view.input.text(), case=False)
+
     def _open_fulltext_result(self, cid: int, line: int):
-        """全文搜索双击结果：打开章节 → 定位到首个匹配 → 高亮全部匹配。"""
+        """全文替换弹窗双击结果：同 _open_and_highlight（跟随弹窗的大小写选项）。"""
+        dlg = self.fulltext_dialog
+        self._open_and_highlight(cid, line, dlg.find_edit.text(),
+                                 case=dlg.case_check.isChecked())
+
+    def _open_and_highlight(self, cid: int, line: int, find_text: str,
+                            case: bool = False):
+        """打开章节 → 定位到首个匹配（文档内 find，与高亮同源）→ 高亮全部匹配。"""
         self.open_chapter(cid)
         editor = self.current_editor()
         if editor is None or getattr(editor, "chapter_id", None) != cid:
             return
         try:
             from PySide6.QtGui import QTextCursor, QTextDocument
-            find_t = self.fulltext_dialog.find_edit.text().strip()
+            find_t = (find_text or "").strip()
             if find_t:
-                case = self.fulltext_dialog.case_check.isChecked()
                 editor.set_match_highlight(find_t, case)
-                # 精确定位到首个匹配（文档内 find，与高亮同源，行号仅兜底）
                 flags = (QTextDocument.FindFlag.FindCaseSensitively
                          if case else QTextDocument.FindFlag(0))
                 cursor = editor.textCursor()
@@ -3788,6 +3797,11 @@ class MainWindow(QMainWindow):
             ot.ai_provider = self._ai_draft_prompt
             ot.draft_saved.connect(self._refresh_chapter_dock)
         dlg.exec()
+        # 角色可能有增删 → 刷新全文搜索的人物下拉
+        try:
+            self.search_view.refresh_characters()
+        except Exception:  # noqa: BLE001
+            pass
 
     def _ai_draft_prompt(self, prompt: str, done_cb):
         """大纲草稿的 AI 生成入口。"""

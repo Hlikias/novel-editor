@@ -6,7 +6,7 @@ from datetime import date
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QApplication, QComboBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
     QSpinBox, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -136,9 +136,10 @@ class StatsView(QWidget):
 
 
 class SearchView(QWidget):
-    """🔍 全文搜索：搜索所有章节标题与正文，双击结果打开章节。"""
+    """🔍 全文搜索：搜索所有章节标题与正文，双击结果打开章节并高亮定位。
+    支持按人物（角色名）快捷检索。"""
 
-    open_requested = Signal(int)
+    open_requested = Signal(int, int)   # 双击结果 → (chapter_id, 首个匹配行号)
     # D 项：空状态引导按钮信号（由主窗口接新建/打开项目）
     new_project_requested = Signal()
     open_project_requested = Signal()
@@ -158,6 +159,12 @@ class SearchView(QWidget):
         self.search_btn.clicked.connect(self.do_search)
         row.addWidget(self.input, 1)
         row.addWidget(self.search_btn)
+        # 按人物检索：选角色名 → 自动搜索（人物全文检索）
+        self.char_combo = QComboBox()
+        self.char_combo.setMinimumWidth(110)
+        self.char_combo.addItem("👤 人物…", None)
+        self.char_combo.currentIndexChanged.connect(self._on_char_picked)
+        row.addWidget(self.char_combo)
         layout.addLayout(row)
 
         self.results = QListWidget()
@@ -196,12 +203,35 @@ class SearchView(QWidget):
         self.storage = storage
         self.results.clear()
         self.status.setText("")
+        self.refresh_characters()
         if storage is None:
             self.empty_hint.setText("📂 请先打开项目（Ctrl+O）再搜索。")
             self.empty_hint.show()
             self.empty_actions.setEnabled(True)
         else:
             self.empty_actions.setEnabled(False)
+
+    def refresh_characters(self):
+        """刷新人物下拉（角色名列表；打开项目时自动调用）。"""
+        self.char_combo.blockSignals(True)
+        self.char_combo.clear()
+        self.char_combo.addItem("👤 人物…", None)
+        if self.storage is not None:
+            try:
+                chars = self.storage.list_characters()
+                if chars:
+                    for c in sorted(chars, key=lambda x: (x.role != "主角", x.id)):
+                        star = "★ " if c.role == "主角" else ""
+                        self.char_combo.addItem(f"{star}{c.name}", c.name)
+            except Exception:  # noqa: BLE001
+                pass
+        self.char_combo.blockSignals(False)
+
+    def _on_char_picked(self, idx):
+        name = self.char_combo.itemData(idx)
+        if name:
+            self.input.setText(name)
+            self.do_search()
 
     def do_search(self):
         self.results.clear()
@@ -220,17 +250,20 @@ class SearchView(QWidget):
             return
         count = 0
         for ch in self.storage.list_chapters():
-            hay = "\n".join([ch.title, ch.subtitle, ch.summary,
-                             html_to_plain(ch.content)]).lower()
+            plain = html_to_plain(ch.content)
+            hay = "\n".join([ch.title, ch.subtitle, ch.summary, plain]).lower()
             if kw not in hay:
                 continue
             preview = ""
-            for line in hay.splitlines():
-                if kw in line:
+            first_line = 0
+            for i, line in enumerate(plain.splitlines(), 1):
+                if kw in line.lower():
                     preview = line.strip()[:40]
+                    first_line = i
                     break
             item = QListWidgetItem(f"{ch.title}：{preview or '（命中，无正文预览）'}")
             item.setData(0x0100, ch.id)
+            item.setData(0x0101, first_line)
             item.setToolTip(ch.summary or "")
             self.results.addItem(item)
             count += 1
@@ -251,7 +284,7 @@ class SearchView(QWidget):
     def _open_result(self, item):
         ch_id = item.data(0x0100)
         if ch_id is not None:
-            self.open_requested.emit(ch_id)
+            self.open_requested.emit(ch_id, item.data(0x0101) or 0)
 
 
 class ChapterListView(QWidget):
