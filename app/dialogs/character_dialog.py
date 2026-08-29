@@ -35,6 +35,30 @@ ROLES = ["主角", "男主角", "女主角", "配角", "反派", "龙套", "其�
 ATTR_CATEGORIES = ["世界观", "势力", "魔法体系", "功法", "地理", "其他"]
 CHAPTER_STATUSES = ["待写", "草稿", "修改", "定稿", "已完成", "弃稿"]
 
+
+def _fill_combo_batch(combo, items):
+    """批量填充 QComboBox：一次性 setModel，避免逐项 addItem 在万项数据下卡顿。
+    items: [(显示文本, 数据值)]；数据经 Qt.ItemDataRole.UserRole 存取。"""
+    from PySide6.QtGui import QStandardItem, QStandardItemModel
+    combo.blockSignals(True)
+    model = QStandardItemModel(combo)
+    for text, data in items:
+        it = QStandardItem(text)
+        it.setData(data, Qt.ItemDataRole.UserRole)
+        model.appendRow(it)
+    combo.setModel(model)
+    combo.blockSignals(False)
+
+
+def _chapter_combo_items(storage, all_label="🌐 全书通用"):
+    """章节下拉数据：[(文本, chapter_id)]；复用 list_chapters 缓存，万章级不卡。"""
+    items = []
+    if all_label:
+        items.append((all_label, 0))
+    items += [(ch.title, ch.id) for ch in storage.list_chapters()]
+    return items
+
+
 # 不同题材对应的世界观属性模板（新建时自动填入，可再修改）
 GENRE_TEMPLATES = {
     "修真": "功法\n法宝\n妖兽种族",
@@ -1374,10 +1398,10 @@ class ChapterStatusTab(QWidget):
     def reload(self):
         self.list_widget.blockSignals(True)
         self.list_widget.clear()
-        for ch in self.storage.list_chapters():
-            item = QListWidgetItem(f"{ch.title}（{ch.status}）")
-            item.setData(0x0100, ch.id)
-            self.list_widget.addItem(item)
+        chapters = self.storage.list_chapters()
+        self.list_widget.addItems([f"{ch.title}（{ch.status}）" for ch in chapters])
+        for i, ch in enumerate(chapters):
+            self.list_widget.item(i).setData(0x0100, ch.id)
         self.list_widget.blockSignals(False)
         if self.list_widget.count():
             self.list_widget.setCurrentRow(0)
@@ -2191,7 +2215,8 @@ class PlotOutlineTab(QWidget):
         self.stage_tree = QTreeWidget()
         self.stage_tree.setHeaderLabels(["章节", "阶段"])
         self.stage_tree.setColumnWidth(0, 200)
-        # 行高足够，避免下拉框/字体被截断
+        # 双击任一行弹菜单设置 起/承/转/合 阶段（万章级不再每行内嵌下拉框）
+        self.stage_tree.itemDoubleClicked.connect(self._on_stage_double)
         self.stage_tree.setStyleSheet(
             "QTreeWidget::item { height: 30px; }"
         )
@@ -2223,19 +2248,17 @@ class PlotOutlineTab(QWidget):
             self._clear_node()
         # 起承转合
         self.stage_tree.blockSignals(True)
-        self.stage_tree.clear()
-        for ch in chapters:
-            item = QTreeWidgetItem([ch.title])
-            item.setData(0, Qt.ItemDataRole.UserRole, ch.id)
-            combo = QComboBox()
-            combo.addItems(self.STAGES)
-            idx2 = combo.findText(ch.outline_stage)
-            combo.setCurrentIndex(max(0, idx2))
-            combo.currentTextChanged.connect(
-                lambda text, cid=ch.id: self._set_stage(cid, text)
-            )
-            self.stage_tree.addTopLevelItem(item)
-            self.stage_tree.setItemWidget(item, 1, combo)
+        self.stage_tree.setUpdatesEnabled(False)
+        try:
+            self.stage_tree.clear()
+            for ch in chapters:
+                stage = (ch.outline_stage or "").strip()
+                item = QTreeWidgetItem([ch.title, stage or "（无）"])
+                item.setData(0, Qt.ItemDataRole.UserRole, ch.id)
+                item.setToolTip(1, "双击设置 起/承/转/合 阶段")
+                self.stage_tree.addTopLevelItem(item)
+        finally:
+            self.stage_tree.setUpdatesEnabled(True)
         self.stage_tree.blockSignals(False)
 
     def _set_stage(self, chapter_id: int, stage: str):
@@ -2243,6 +2266,23 @@ class PlotOutlineTab(QWidget):
         if ch:
             ch.outline_stage = "" if stage == "（无）" else stage
             self.storage.update_chapter(ch)
+
+    def _on_stage_double(self, item, _col):
+        """双击「起承转合」树任一行 → 菜单选阶段（万章级不再每行内嵌下拉框）。"""
+        cid = item.data(0, Qt.ItemDataRole.UserRole)
+        if cid is None:
+            return
+        menu = QMenu(self)
+        cur = item.text(1)
+        for s in self.STAGES:
+            a = menu.addAction(s)
+            a.setCheckable(True)
+            a.setChecked(s == cur)
+        chosen = menu.exec(QCursor.pos())
+        if chosen is None or chosen.text() == cur:
+            return
+        self._set_stage(cid, chosen.text())
+        item.setText(1, chosen.text())
 
     def _save_project(self):
         book = self.storage.get_book()
@@ -2440,15 +2480,10 @@ class RelationsTab(QWidget):
 
     def reload(self, select_id: int | None = None):
         # 章节下拉（全书 + 各章节）
-        self.chapter_combo.blockSignals(True)
-        self.chapter_combo.clear()
-        self.chapter_combo.addItem("🌐 全书通用", 0)
-        for ch in self.storage.list_chapters():
-            self.chapter_combo.addItem(ch.title, ch.id)
+        _fill_combo_batch(self.chapter_combo, _chapter_combo_items(self.storage))
         idx = self.chapter_combo.findData(self._chapter_id)
         self.chapter_combo.setCurrentIndex(max(0, idx))
         self._chapter_id = self.chapter_combo.currentData() or 0
-        self.chapter_combo.blockSignals(False)
 
         self._fill_combos()
         self.list_widget.blockSignals(True)
@@ -2708,9 +2743,7 @@ class RelationGraphWidget(QWidget):
         top = QHBoxLayout()
         top.addWidget(QLabel("章节"))
         self.chapter_combo = QComboBox()
-        self.chapter_combo.addItem("🌐 全书通用", 0)
-        for ch in self.storage.list_chapters():
-            self.chapter_combo.addItem(ch.title, ch.id)
+        _fill_combo_batch(self.chapter_combo, _chapter_combo_items(self.storage))
         idx = self.chapter_combo.findData(self.chapter_id)
         self.chapter_combo.setCurrentIndex(max(0, idx))
         self.chapter_combo.currentIndexChanged.connect(lambda _i: self._draw())
@@ -3037,9 +3070,7 @@ class _RelationDialog(GradientDialog):
         layout = self.body
         form = QFormLayout()
         self.chapter_combo = QComboBox()
-        self.chapter_combo.addItem("🌐 全书通用", 0)
-        for ch in storage.list_chapters():
-            self.chapter_combo.addItem(ch.title, ch.id)
+        _fill_combo_batch(self.chapter_combo, _chapter_combo_items(storage))
         sel_chapter = relation.chapter_id if relation is not None else chapter_id
         idx = self.chapter_combo.findData(sel_chapter)
         self.chapter_combo.setCurrentIndex(max(0, idx))
@@ -3232,17 +3263,14 @@ class MapTab(QWidget):
         self._fill_chapters()
 
     def _fill_chapters(self):
-        self.chapter_combo.blockSignals(True)
-        self.chapter_combo.clear()
-        self.chapter_combo.addItem("🌱 故事起源（最开始）", 0)
         if self._current_map_id == 0:
             chapters = self.storage.list_chapters()
         else:
             bound = set(self.storage.list_chapters_for_map(self._current_map_id))
             chapters = [c for c in self.storage.list_chapters() if c.id in bound]
-        for ch in chapters:
-            self.chapter_combo.addItem(f"{ch.title}（{ch.outline_stage or '未标记'}）", ch.id)
-        self.chapter_combo.blockSignals(False)
+        items = [("🌱 故事起源（最开始）", 0)]
+        items += [(f"{ch.title}（{ch.outline_stage or '未标记'}）", ch.id) for ch in chapters]
+        _fill_combo_batch(self.chapter_combo, items)
         if self.chapter_combo.count():
             self.chapter_combo.setCurrentIndex(0)
         else:
@@ -3268,18 +3296,22 @@ class MapTab(QWidget):
             self.map_combo.setCurrentIndex(max(0, idx))
 
     def _bind_chapters(self):
-        """选择该地图绑定的章节（勾选的章节使用此地图）。"""
-        from PySide6.QtWidgets import QCheckBox
+        """选择该地图绑定的章节（勾选的章节使用此地图）。
+        万章级用 QListWidget 勾选列表，避免创建上万个 QCheckBox 控件卡死。"""
         dlg = GradientDialog("🔗 绑定章节", self, resizable=True)
-        dlg.setMinimumWidth(360)
+        dlg.setMinimumSize(420, 560)
         body = dlg.body
         body.addWidget(QLabel(f"勾选使用《{self.map_combo.currentText()}》的章节："))
-        checks = []
+        lst = QListWidget()
         for ch in self.storage.list_chapters():
-            cb = QCheckBox(ch.title)
-            cb.setChecked(self._current_map_id in (self.storage.get_map_for_chapter(ch.id),))
-            checks.append((ch.id, cb))
-            body.addWidget(cb)
+            it = QListWidgetItem(ch.title)
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(Qt.CheckState.Checked
+                             if self._current_map_id == self.storage.get_map_for_chapter(ch.id)
+                             else Qt.CheckState.Unchecked)
+            it.setData(0x0100, ch.id)
+            lst.addItem(it)
+        body.addWidget(lst, 1)
         row = QHBoxLayout()
         ok_btn = QPushButton("确定")
         cancel_btn = QPushButton("取消")
@@ -3290,8 +3322,11 @@ class MapTab(QWidget):
         row.addWidget(cancel_btn)
         body.addLayout(row)
         if dlg.exec() == GradientDialog.DialogCode.Accepted:
-            for ch_id, cb in checks:
-                self.storage.set_map_for_chapter(ch_id, self._current_map_id if cb.isChecked() else 0)
+            for i in range(lst.count()):
+                it = lst.item(i)
+                ch_id = it.data(0x0100)
+                self.storage.set_map_for_chapter(
+                    ch_id, self._current_map_id if it.checkState() == Qt.CheckState.Checked else 0)
             self._fill_chapters()
 
     def _toggle_place(self, on: bool):
