@@ -22,7 +22,7 @@ class FullTextReplaceDialog(GradientDialog):
     - editor_for(chapter_id) 返回已打开章节的编辑器（存在则改编辑器，否则改库）
     """
 
-    open_requested = Signal(int)       # 双击结果 → 打开章节
+    open_requested = Signal(int, int)  # 双击结果 → (chapter_id, 首个匹配行号)
     chapters_changed = Signal()        # 全书替换后 → 主窗口刷新
 
     def __init__(self, parent=None, storage_provider=None, editor_for=None):
@@ -92,17 +92,25 @@ class FullTextReplaceDialog(GradientDialog):
             # 与 replace_all 对齐：已打开章节用编辑器内容，其余读库；正文按纯文本搜索
             editor = self.editor_for(ch.id) if self.editor_for else None
             content = editor.content() if editor is not None else ch.content
-            hay = "\n".join([ch.title, ch.subtitle, ch.summary, html_to_plain(content)])
+            plain = html_to_plain(content)
+            hay = "\n".join([ch.title, ch.subtitle, ch.summary, plain])
             n = len(re.findall(re.escape(find_t), hay, flags))
             if n == 0:
                 continue
+            # 首个匹配在正文中的行号（编辑器内定位用，不含标题/副标题/浓缩前缀）
+            first_line = 0
+            for i, ln in enumerate(plain.splitlines(), 1):
+                if re.search(re.escape(find_t), ln, flags):
+                    first_line = i
+                    break
             hit_chapters += 1
             hit_total += n
             item = QListWidgetItem(f"{ch.title}：命中 {n} 处")
             item.setData(0x0100, ch.id)
+            item.setData(0x0101, first_line)
             item.setToolTip(ch.summary or "")
             self.results.addItem(item)
-        self.status.setText(f"命中 {hit_chapters} 个章节，共 {hit_total} 处（双击结果打开章节）")
+        self.status.setText(f"命中 {hit_chapters} 个章节，共 {hit_total} 处（双击结果跳转并高亮）")
 
     # ---------- 全书替换 ----------
     def _flags(self) -> QTextDocument.FindFlag:
@@ -204,4 +212,4 @@ class FullTextReplaceDialog(GradientDialog):
     def _open(self, item):
         cid = item.data(0x0100)
         if cid is not None:
-            self.open_requested.emit(cid)
+            self.open_requested.emit(cid, item.data(0x0101) or 0)

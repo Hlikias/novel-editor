@@ -3550,13 +3550,42 @@ class MainWindow(QMainWindow):
                 storage_provider=lambda: self.storage,
                 editor_for=lambda cid: self._tab_chapters.get(cid),
             )
-            self.fulltext_dialog.open_requested.connect(self.open_chapter)
+            self.fulltext_dialog.open_requested.connect(self._open_fulltext_result)
             self.fulltext_dialog.chapters_changed.connect(self._refresh_chapter_dock)
         dlg = self.fulltext_dialog
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
         dlg.find_edit.setFocus()
+
+    def _open_fulltext_result(self, cid: int, line: int):
+        """全文搜索双击结果：打开章节 → 定位到首个匹配 → 高亮全部匹配。"""
+        self.open_chapter(cid)
+        editor = self.current_editor()
+        if editor is None or getattr(editor, "chapter_id", None) != cid:
+            return
+        try:
+            from PySide6.QtGui import QTextCursor, QTextDocument
+            find_t = self.fulltext_dialog.find_edit.text().strip()
+            if find_t:
+                case = self.fulltext_dialog.case_check.isChecked()
+                editor.set_match_highlight(find_t, case)
+                # 精确定位到首个匹配（文档内 find，与高亮同源，行号仅兜底）
+                flags = (QTextDocument.FindFlag.FindCaseSensitively
+                         if case else QTextDocument.FindFlag(0))
+                cursor = editor.textCursor()
+                cursor.movePosition(QTextCursor.MoveOperation.Start)
+                found = editor.document().find(find_t, cursor, flags)
+                if not found.isNull():
+                    editor.setTextCursor(found)
+                    editor.ensureCursorVisible()
+                elif line and line > 0:
+                    editor.goto_line(line)
+            else:
+                editor.set_match_highlight("")   # 搜索词已清空 → 清除残留高亮
+            editor.setFocus()
+        except Exception:  # noqa: BLE001
+            pass
 
     # ---------- AI 写作输入 / 语音输入 / 设定查询 ----------
     def show_voice_input_dialog(self):
