@@ -474,10 +474,11 @@ class WritingGoalView(QWidget):
 
     goal_changed = Signal(int)
 
-    def __init__(self, parent=None):
+    def __init__(self, tracker=None, parent=None):
         super().__init__(parent)
         self.storage = None
         self.goal = 1000
+        self._tracker = tracker   # DailyWordCountTracker：今日净增字数（可 None）
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -527,11 +528,8 @@ class WritingGoalView(QWidget):
             self.progress.setValue(0)
             self.info.setText("未打开项目")
             return
-        today = date.today().strftime("%Y-%m-%d")
-        try:
-            words = self.storage.today_updated_words(today)   # SQL 聚合，避免全表拉取
-        except Exception:  # noqa: BLE001
-            words = 0
+        # 今日进度 = 今日净增字数（word_tracker），不是“今天更新过的章节全文字数总和”
+        words = self._tracker.today_words() if self._tracker is not None else 0
         self.progress.setRange(0, max(1, self.goal))
         self.progress.setValue(min(words, self.goal))
         pct = min(100, round(words / self.goal * 100)) if self.goal else 0

@@ -1900,7 +1900,7 @@ class MainWindow(QMainWindow):
         self.bottom_tabs.addTab(self.console, "💻 控制台")
 
         # 底部：写作目标
-        self.goal_view = WritingGoalView()
+        self.goal_view = WritingGoalView(self.word_tracker)
         goal = self.config.get("app", {}).get("daily_goal", 1000)
         self.goal_view.set_goal(goal)
         self.goal_view.goal_changed.connect(self._on_goal_changed)
@@ -4365,8 +4365,9 @@ class MainWindow(QMainWindow):
             self.book_label.setText(f"📚 {book.title}" if book else "未打开项目")
         else:
             self.book_label.setText("未打开项目")
-        # 今日写作字数（写作目标进度）
-        today_words = self.time_tracker.stats().get("today", 0)
+        # 今日写作字数（写作目标进度）：净增字数（word_tracker），
+        # 不是写作秒数（time_tracker）也不是“今天更新过的章节全文字数总和”
+        today_words = self.word_tracker.today_words()
         goal = int(self.config.get("app", {}).get("daily_goal", 1000) or 1000)
         self.today_label.setText(f"✍️ 今日 {today_words}/{goal} 字")
         unit = self._unit()          # 章 / 篇
