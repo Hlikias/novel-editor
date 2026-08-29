@@ -239,7 +239,8 @@ class AIPanel(QWidget):
     # ---------- 布局自适应 ----------
     def set_layout_for_dock(self, area) -> None:
         """按 dock 区域切换 提问/回答 布局：
-        底部/顶部=左右分布（右输入、左回答）；左右两侧=上下分布（上输入、下回答）。"""
+        底部/顶部=左右分布（右输入、左回答）；左右两侧=上下分布（上输入、下回答）。
+        幂等：顺序与方向始终一致，防止 dock 位置恢复/拖动时序导致上下颠倒。"""
         try:
             from PySide6.QtCore import Qt as _Qt
             bottom_like = area in (
@@ -256,6 +257,17 @@ class AIPanel(QWidget):
         self._io_splitter.setOrientation(
             Qt.Orientation.Horizontal if bottom_like else Qt.Orientation.Vertical
         )
+
+    def showEvent(self, event):
+        """每次显示时按当前 dock 区域校正 提问/回答 布局（防位置恢复后错乱）。"""
+        super().showEvent(event)
+        try:
+            win = self.window()
+            if win is not None and hasattr(win, "ai_dock") and hasattr(win, "ai_panel"):
+                area = win.dockWidgetArea(win.ai_dock)
+                self.set_layout_for_dock(area)
+        except Exception:  # noqa: BLE001
+            pass
 
     # ---------- 技能 / 身份 ----------
     def _reload_skill_combo(self):

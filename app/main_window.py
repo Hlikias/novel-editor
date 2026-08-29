@@ -2085,6 +2085,8 @@ class MainWindow(QMainWindow):
     def _on_ai_dock_moved(self, area):
         """AI dock 被拖到不同区域时，面板 提问/回答 框自适应布局。"""
         try:
+            if area == Qt.DockWidgetArea.NoDockWidgetArea:
+                area = self.dockWidgetArea(self.ai_dock)
             self.ai_panel.set_layout_for_dock(area)
         except Exception:  # noqa: BLE001
             pass
