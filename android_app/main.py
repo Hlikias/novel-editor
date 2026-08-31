@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 
-from kivy.app import App
 from kivy.core.window import Window
 from kivy.uix.screenmanager import ScreenManager
 from kivymd.app import MDApp

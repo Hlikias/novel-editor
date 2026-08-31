@@ -6,9 +6,7 @@ from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.screenmanager import Screen
-from kivymd.uix.button import (MDFillRoundFlatButton, MDFlatButton, MDIconButton,
-                               MDRaisedButton, MDRectangleFlatButton)
+from kivymd.uix.button import (MDFlatButton, MDIconButton, MDRaisedButton)
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.label import MDLabel
 from kivymd.uix.list import MDList, OneLineListItem, TwoLineListItem
