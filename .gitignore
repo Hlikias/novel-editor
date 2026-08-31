@@ -13,6 +13,7 @@ __pycache__/
 build/
 dist/
 *.spec
+!android_app/buildozer.spec
 x64/
 .novel_editor/
 
