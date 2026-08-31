@@ -53,6 +53,28 @@ python main.py
 3. 写作时可用右侧 **AI 写作助手** 对话/润色/续写；「项目 → AI 一键前期策划」可先让 AI 生成全书设定。
 4. 「文件 → 导出为 Word/PDF」或「导出漫剧脚本（AI 生成）」输出成品。
 
+## 📱 安卓版（精简版）
+
+`android_app/` 是基于 **Kivy + KivyMD** 的安卓精简版（独立 APK），保留核心能力：
+- **写作**：新建/打开项目、章节列表、编辑器、字数统计、保存
+- **管理**：章节增删、角色 / 世界观 / 大纲 / 自定义设定（可编辑）
+- **AI**：一键生成全书设定（角色/世界观/大纲写入项目）、续写、润色（需自备 OpenAI 兼容 API）
+- **导出**：全书 txt（安卓分享）
+
+**安装**：从 GitHub **Releases** 下载 `AI码小说-*-arm64-v8a.apk`（近两年手机）或 `armeabi-v7a`（老机），手机安装时允许"未知来源"即可。
+
+**打包**：无需本机环境，GitHub Actions 的 **Build Android APK** 云打包（推 `v*` 标签自动发布到 Releases）。
+
+```
+android_app/
+├── main.py              App 入口（ScreenManager）
+├── data/storage.py      数据层（SQLite，单库多项目）
+├── ui/screens.py        六屏（项目/章节/编辑器/设定/AI/配置）
+├── ai/client.py         OpenAI 兼容 API 客户端
+├── tools/export.py      txt 导出 + 安卓分享
+└── buildozer.spec       安卓打包配置
+```
+
 ## 💾 数据存储
 
 - 一个项目 = 一个 `.db` 文件（SQLite），存放于你选择的文件夹，方便备份/拷贝。
