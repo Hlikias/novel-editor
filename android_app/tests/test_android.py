@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""安卓版开发验证：①数据层单测 ②UI 冒烟（mock 窗口，自动退出）。"""
+"""安卓版开发验证：①数据层单测 ②UI 冒烟（真实窗口，自动退出）。"""
 import os
 import sys
 import tempfile
 
 os.environ["KIVY_NO_ARGS"] = "1"
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ok = True
 

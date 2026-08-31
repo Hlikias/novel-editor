@@ -159,8 +159,12 @@ class ChapterListScreen(MDScreen):
     def _add_chapter(self):
         if app().storage is None:
             return
-        cid = app().storage.add_chapter(app().current_book_id, f"第 {len(app().storage.list_chapters(app().current_book_id)) + 1} 章", "")
-        ch = app().storage.get_chapter(cid)
+        st = app().storage
+        rows = st._query("SELECT COALESCE(MAX(\"order\"),0) AS m FROM chapters WHERE book_id=?",
+                         (app().current_book_id,))
+        n = (rows[0]["m"] if rows else 0) + 1
+        cid = st.add_chapter(app().current_book_id, f"第 {n} 章", "")
+        ch = st.get_chapter(cid)
         self._open_chapter(ch)
 
     def _goto_ai(self):
@@ -430,6 +434,8 @@ class SettingsScreen(MDScreen):
         tab.add_widget(row)
         sv, self.setting_list = _mk_list()
         tab.add_widget(sv, 1)
+        # 模块名输入变化 → 自动刷新条目列表
+        self.kind_edit.bind(text=lambda *a: self._refresh_settings())
 
     def _refresh_settings(self):
         self.setting_list.clear_widgets()
