@@ -61,7 +61,7 @@ python main.py
 - **AI**：一键生成全书设定（角色/世界观/大纲写入项目）、续写、润色（需自备 OpenAI 兼容 API）
 - **导出**：全书 txt（安卓分享）
 
-**安装**：从 GitHub **Releases** 下载 `AI码小说-*-arm64-v8a.apk`（近两年手机）或 `armeabi-v7a`（老机），手机安装时允许"未知来源"即可。
+**安装**：从 GitHub **Releases** 下载 `AI码小说-*-arm64-v8a.apk`（近两年手机均适用），手机安装时允许"未知来源"即可（如需兼容老机 armeabi-v7a，可在 CI 打包时去掉 `--arch arm64-v8a` 参数）。
 
 **打包**：无需本机环境，GitHub Actions 的 **Build Android APK** 云打包（推 `v*` 标签自动发布到 Releases）。
 
