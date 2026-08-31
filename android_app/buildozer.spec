@@ -22,6 +22,8 @@ android.target_sdk_version = 33
 
 android.allow_backup = True
 android.private_storage = True
+# CI 非交互环境自动接受 Android SDK 组件许可证（否则 Build-Tools/Aidl 装不上）
+android.accept_sdk_license = True
 
 # 图标（512x512）
 icon.filename = %(source.dir)s/icon-512.png

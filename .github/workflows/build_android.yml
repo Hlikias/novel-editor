@@ -45,7 +45,8 @@ jobs:
           cd android_app
           # 默认只打 arm64-v8a（主流近两年手机），7GB runner 内存更稳；
           # 需要兼容老机（armeabi-v7a）时去掉 --arch 参数（时间会翻倍）
-          python -m buildozer android debug --arch arm64-v8a
+          # yes | 兜底接受 sdkmanager 交互式许可证提示
+          yes | python -m buildozer android debug --arch arm64-v8a
         env:
           ANDROIDSDK_HOME: /opt/android-sdk
 
